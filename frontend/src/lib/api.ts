@@ -1,8 +1,14 @@
 import axios from 'axios';
 
-// Create API client pointing to FastAPI backend directly (bypassing Vite proxy)
+let baseURL = import.meta.env.VITE_API_URL || '';
+
+// Automatically handle GitHub Codespaces port forwarding hosts
+if (typeof window !== 'undefined' && window.location.hostname.includes('.github.dev')) {
+  baseURL = `https://${window.location.hostname.replace('-3000', '-8080')}`;
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080',
+  baseURL,
   headers: {
     'Content-Type': 'application/json',
   },

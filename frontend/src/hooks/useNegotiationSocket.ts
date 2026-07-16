@@ -11,6 +11,9 @@ export function useNegotiationSocket(onMessageCallback: (data: any) => void) {
     // Use configured VITE_WS_URL if available
     if (import.meta.env.VITE_WS_URL) {
       socketUrl = import.meta.env.VITE_WS_URL;
+    } else if (window.location.hostname.includes('.github.dev')) {
+      // Auto-resolve Codespaces WebSocket port-forwarding URL
+      socketUrl = `wss://${window.location.hostname.replace('-3000', '-8080')}/ws`;
     } else {
       // Use configured VITE_API_URL if available, transforming http/https to ws/wss
       const apiUrl = import.meta.env.VITE_API_URL;
