@@ -1,6 +1,11 @@
 import os
 import json
 import logging
+from dotenv import load_dotenv
+
+# Load .env variables
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"))
+load_dotenv()
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse

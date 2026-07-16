@@ -404,7 +404,33 @@ async def run_ai_negotiation(payload: AINegotiationRequest, db: Session = Depend
         { "agent": 'Orchestrator', "role": 'System Orchestrator', "color": '#7C3AED', "text": f'Negotiation sequence complete. Structural resolution: Route patient {patient.id} to ICU-07 with standby support.' }
     ]
 
-    if not config or config.provider == "MOCK" or not config.api_key_encrypted:
+    import os
+
+    provider = None
+    api_key = None
+    model_name = None
+    max_tokens = 1000
+
+    if config and config.provider != "MOCK" and config.api_key_encrypted:
+        provider = config.provider
+        api_key = decrypt_val(config.api_key_encrypted)
+        model_name = config.model_name
+        max_tokens = config.max_tokens or 1000
+    else:
+        if os.getenv("OPENAI_API_KEY"):
+            provider = "OPENAI"
+            api_key = os.getenv("OPENAI_API_KEY")
+            model_name = os.getenv("OPENAI_MODEL_NAME") or "gpt-4o-mini"
+        elif os.getenv("GEMINI_API_KEY"):
+            provider = "GEMINI"
+            api_key = os.getenv("GEMINI_API_KEY")
+            model_name = os.getenv("GEMINI_MODEL_NAME") or "gemini-1.5-flash"
+        elif os.getenv("ANTHROPIC_API_KEY"):
+            provider = "ANTHROPIC"
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            model_name = os.getenv("ANTHROPIC_MODEL_NAME") or "claude-3-5-sonnet-20241022"
+
+    if not provider or not api_key:
         # Log simulated action
         time_str = datetime.datetime.now().strftime("%I:%M:%S %p")
         log = NexusAuditLog(
@@ -418,13 +444,12 @@ async def run_ai_negotiation(payload: AINegotiationRequest, db: Session = Depend
         return mock_messages
 
     try:
-        api_key = decrypt_val(config.api_key_encrypted)
         llm_client = get_client_by_provider(
-            provider=config.provider,
+            provider=provider,
             api_key=api_key,
-            model_name=config.model_name,
+            model_name=model_name,
             temperature=0.2,
-            max_tokens=config.max_tokens or 1000
+            max_tokens=max_tokens
         )
         
         try:
