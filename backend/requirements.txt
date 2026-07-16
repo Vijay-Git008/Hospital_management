@@ -12,3 +12,4 @@ python-multipart>=0.0.6
 pytest>=7.3.0
 pytest-asyncio>=0.21.0
 python-dotenv>=1.0.0
+google-genai>=2.3.0

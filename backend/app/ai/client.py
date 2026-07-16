@@ -41,35 +41,23 @@ class OpenAIClient(LLMClient):
 class GeminiClient(LLMClient):
     def __init__(self, api_key: str, model_name: str, temperature: float, max_tokens: int):
         self.api_key = api_key
-        # Default to gemini-1.5-flash or gemini-2.5-flash
-        self.model_name = model_name or "gemini-1.5-flash"
+        # Default to gemini-3.5-flash as the modern primary model
+        self.model_name = model_name or "gemini-3.5-flash"
         self.temperature = temperature
         self.max_tokens = max_tokens
 
     async def generate_text(self, prompt: str) -> str:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": self.temperature,
-                "maxOutputTokens": self.max_tokens
-            }
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=30.0
-            )
-            if response.status_code != 200:
-                raise Exception(f"Gemini error: {response.status_code} - {response.text}")
-            data = response.json()
-            try:
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-            except (KeyError, IndexError):
-                raise Exception(f"Unexpected Gemini response structure: {data}")
+        from google import genai
+        
+        # Initialize GenAI Client with key
+        client = genai.Client(api_key=self.api_key)
+        
+        # Use modern interactions.create API
+        interaction = client.interactions.create(
+            model=self.model_name,
+            input=prompt
+        )
+        return interaction.output_text
 
 class AnthropicClient(LLMClient):
     def __init__(self, api_key: str, model_name: str, temperature: float, max_tokens: int):
