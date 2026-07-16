@@ -15,8 +15,10 @@ echo ""
 if [ -d "venv" ]; then
     echo "[1/4] Activating virtual environment..."
     source venv/bin/activate
+    pip install -r backend/requirements.txt
 else
-    echo "[1/4] No virtual environment found, using system Python..."
+    echo "[1/4] No virtual environment found, installing dependencies on system Python..."
+    pip install -r backend/requirements.txt
 fi
 
 # 2. Seed database
@@ -36,8 +38,9 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 &
 cd ..
 
 # 4. Start Frontend
-echo "[4/4] Starting frontend Vite dashboard on port 3000..."
+echo "[4/4] Resolving frontend dependencies and starting Vite..."
 cd frontend
+npm install
 npm run dev -- --host 0.0.0.0 &
 cd ..
 
