@@ -2273,12 +2273,20 @@
     // --- MAIN FRAMEWORK RENDER ---
     const App = () => {
       const [screen, setScreen] = useState('INTRO');
-      const [user, setUser] = useState(null);
+      const [user, setUser] = useState({
+        id: 'DR-2025-001',
+        username: 'DR-2025-001',
+        name: 'Anjali Sharma',
+        role: 'DOCTOR',
+        initial: 'A',
+        specialty: 'Emergency Medicine',
+        dept: 'Emergency Medicine'
+      });
 
       return (
         <div style={{width: '100vw', height: '100vh', overflow: 'hidden'}}>
           {screen === 'INTRO' && (
-            <IntroScreen onComplete={() => setScreen('LOGIN')} />
+            <IntroScreen onComplete={() => setScreen('DASHBOARD')} />
           )}
           {screen === 'LOGIN' && (
             <LoginScreen onSuccess={(u) => { setUser(u); setScreen('WELCOME'); }} />

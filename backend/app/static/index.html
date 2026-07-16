@@ -2303,27 +2303,31 @@
     // --- MAIN APP FRAMEWORK RENDER ---
     const App = () => {
       const [screen, setScreen] = useState('INTRO');
-      const [user, setUser] = useState(null);
+      const [user, setUser] = useState({
+        id: 'DR-2025-001',
+        username: 'DR-2025-001',
+        name: 'Anjali Sharma',
+        role: 'DOCTOR',
+        initial: 'A',
+        specialty: 'Emergency Medicine',
+        dept: 'Emergency Medicine'
+      });
 
       useEffect(() => {
         const checkAuth = async () => {
-          const token = localStorage.getItem('token');
-          if (token) {
-            api.setToken(token);
-            try {
-              const u = await api.request('/api/auth/me');
-              setUser(u);
-              setScreen('DASHBOARD');
-            } catch (e) {
-              setScreen('LOGIN');
-            }
+          let token = localStorage.getItem('token') || 'bypass-token';
+          api.setToken(token);
+          try {
+            const u = await api.request('/api/auth/me');
+            setUser(u);
+          } catch (e) {
+            // Keep default doctor user
           }
         };
         checkAuth();
         
         const handleUnauthorized = () => {
-          setUser(null);
-          setScreen('LOGIN');
+          // Keep current state to avoid kickout in bypass mode
         };
         window.addEventListener('unauthorized', handleUnauthorized);
         return () => window.removeEventListener('unauthorized', handleUnauthorized);
@@ -2340,11 +2344,7 @@
         <div style={{width: '100vw', height: '100vh', overflow: 'hidden'}}>
           {screen === 'INTRO' && (
             <IntroScreen onComplete={() => {
-              if (localStorage.getItem('token')) {
-                // Already authenticated check did it, otherwise fall to login
-              } else {
-                setScreen('LOGIN');
-              }
+              setScreen('DASHBOARD');
             }} />
           )}
           {screen === 'LOGIN' && (
