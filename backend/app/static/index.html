@@ -447,10 +447,14 @@
     const WelcomeScreen = ({ user, onComplete }) => {
       useEffect(() => { setTimeout(onComplete, 2000); }, []);
       const userTitle = useMemo(() => {
-        if (user.role === 'DOCTOR') return 'Dr. ';
-        if (user.role === 'NURSE') return 'Nurse ';
+        if (!user || !user.role) return '';
+        const role = user.role.toUpperCase();
+        if (role === 'DOCTOR') return 'Dr. ';
+        if (role === 'NURSE') return 'Nurse ';
         return '';
       }, [user]);
+
+      if (!user) return null;
 
       return (
         <div className="flex-col items-center justify-center w-full h-full" style={{background: COLORS.sidebar, height: '100vh', animation: 'fade-in 0.5s', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center'}}>
@@ -485,46 +489,15 @@
 
     // --- MAIN DASHBOARD CONTAINER ---
     const Dashboard = ({ user, onLogout }) => {
+      if (!user) return null;
+
       // PERSISTENT RELATIONAL DATA LAYERS
-      const [patients, setPatients] = useState(() => {
-        const saved = localStorage.getItem('NEXUS_PATIENTS_DB');
-        return saved ? JSON.parse(saved) : INITIAL_PATIENTS;
-      });
-
-      const [beds, setBeds] = useState(() => {
-        const saved = localStorage.getItem('NEXUS_BEDS_DB');
-        if (saved) return JSON.parse(saved);
-        const initialBeds = generateBeds();
-        INITIAL_PATIENTS.forEach(p => {
-          const bed = initialBeds.find(b => b.id === p.bedId);
-          if (bed) {
-            bed.status = p.status;
-            bed.patientId = p.id;
-          }
-        });
-        return initialBeds;
-      });
-
-      const [ventilators, setVentilators] = useState(() => {
-        const saved = localStorage.getItem('NEXUS_VENT_DB');
-        return saved ? JSON.parse(saved) : INITIAL_VENTILATORS;
-      });
-
-      const [manualActions, setManualActions] = useState(() => {
-        const saved = localStorage.getItem('NEXUS_MANUAL_LOGS_DB');
-        return saved ? JSON.parse(saved) : [];
-      });
-
-      const [lastAlert, setLastAlert] = useState(() => {
-        const saved = localStorage.getItem('NEXUS_LAST_ALERT_DB');
-        return saved ? JSON.parse(saved) : null;
-      });
-
-      // BYOK KEYS AND PROVIDERS CONFIG
-      const [byokConfig, setByokConfig] = useState(() => {
-        const saved = localStorage.getItem('NEXUS_BYOK_CONFIG');
-        return saved ? JSON.parse(saved) : { provider: 'MOCK', apiKey: '', model: '', endpoint: '' };
-      });
+      const [patients, setPatients] = useState([]);
+      const [beds, setBeds] = useState([]);
+      const [ventilators, setVentilators] = useState({});
+      const [manualActions, setManualActions] = useState([]);
+      const [lastAlert, setLastAlert] = useState(null);
+      const [byokConfig, setByokConfig] = useState({ provider: 'MOCK', apiKey: '', model: '', endpoint: '' });
 
       const [notificationsOpen, setNotificationsOpen] = useState(false);
       const [modalPatientId, setModalPatientId] = useState(null);
@@ -538,55 +511,68 @@
         return () => clearInterval(timer);
       }, []);
 
-      // SAVE UTILITY
-      const triggerSave = (updatedPatients, updatedBeds, updatedVents, newActionLog = null) => {
-        localStorage.setItem('NEXUS_PATIENTS_DB', JSON.stringify(updatedPatients));
-        localStorage.setItem('NEXUS_BEDS_DB', JSON.stringify(updatedBeds));
-        localStorage.setItem('NEXUS_VENT_DB', JSON.stringify(updatedVents));
-        
-        setPatients(updatedPatients);
-        setBeds(updatedBeds);
-        setVentilators(updatedVents);
-
-        if (newActionLog) {
-          const actionEntry = {
-            id: `ACT-${Date.now()}`,
-            agent: user.name,
-            role: user.role,
-            text: newActionLog,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-          };
-          const updatedLogs = [actionEntry, ...manualActions];
-          localStorage.setItem('NEXUS_MANUAL_LOGS_DB', JSON.stringify(updatedLogs));
-          setManualActions(updatedLogs);
+      const loadAllData = async () => {
+        try {
+          const fetchedPatients = await api.request('/api/nexus/patients');
+          const fetchedBeds = await api.request('/api/nexus/beds');
+          const fetchedVentilators = await api.request('/api/nexus/ventilators');
+          const fetchedLogs = await api.request('/api/nexus/logs');
+          const fetchedLastAlert = await api.request('/api/nexus/last-alert');
+          const fetchedBYOKConfig = await api.request('/api/nexus/byok-config');
+          
+          setPatients(fetchedPatients);
+          setBeds(fetchedBeds);
+          setVentilators(fetchedVentilators);
+          setManualActions(fetchedLogs);
+          setLastAlert(fetchedLastAlert);
+          setByokConfig(fetchedBYOKConfig);
+        } catch (e) {
+          console.error("Error loading data from backend:", e);
         }
-        window.dispatchEvent(new Event('db-updated'));
       };
 
-      // Sync active database keys across tabs
-      const saveBYOKConfig = (newConfig) => {
-        localStorage.setItem('NEXUS_BYOK_CONFIG', JSON.stringify(newConfig));
-        setByokConfig(newConfig);
-        triggerToast('BYOK configuration updated and securely saved.');
-      };
-
-      // Sync tabs on database update events
       useEffect(() => {
-        const handleDbUpdate = () => {
-          const savedPatients = localStorage.getItem('NEXUS_PATIENTS_DB');
-          const savedBeds = localStorage.getItem('NEXUS_BEDS_DB');
-          const savedVents = localStorage.getItem('NEXUS_VENT_DB');
-          const savedLogs = localStorage.getItem('NEXUS_MANUAL_LOGS_DB');
-          const savedAlert = localStorage.getItem('NEXUS_LAST_ALERT_DB');
-          if (savedPatients) setPatients(JSON.parse(savedPatients));
-          if (savedBeds) setBeds(JSON.parse(savedBeds));
-          if (savedVents) setVentilators(JSON.parse(savedVents));
-          if (savedLogs) setManualActions(JSON.parse(savedLogs));
-          if (savedAlert) setLastAlert(JSON.parse(savedAlert));
-        };
-        window.addEventListener('db-updated', handleDbUpdate);
-        return () => window.removeEventListener('db-updated', handleDbUpdate);
-      }, [manualActions]);
+        loadAllData();
+        const interval = setInterval(loadAllData, 5000);
+        return () => clearInterval(interval);
+      }, []);
+
+      const writeManualLog = async (text) => {
+        try {
+          await api.request('/api/nexus/logs', {
+            method: 'POST',
+            body: JSON.stringify({ text })
+          });
+        } catch (e) {
+          console.error("Failed to write manual log:", e);
+        }
+      };
+
+      const triggerSave = async (updatedPatients, updatedBeds, updatedVents, newActionLog = null) => {
+        if (newActionLog) {
+          await writeManualLog(newActionLog);
+        }
+        await loadAllData();
+      };
+
+      const saveBYOKConfig = async (newConfig) => {
+        try {
+          await api.request('/api/nexus/byok-config', {
+            method: 'POST',
+            body: JSON.stringify({
+              provider: newConfig.provider,
+              apiKey: newConfig.apiKey,
+              model: newConfig.model,
+              endpoint: newConfig.endpoint
+            })
+          });
+          setByokConfig(newConfig);
+          triggerToast('BYOK configuration updated and securely saved.');
+          await loadAllData();
+        } catch (e) {
+          alert(e.message);
+        }
+      };
 
       const modalPatient = useMemo(() => {
         if (!modalPatientId) return null;
@@ -616,7 +602,9 @@
       }, [patients, beds]);
 
       const allowedTabs = useMemo(() => {
-        if (user.role === 'DOCTOR') {
+        if (!user || !user.role) return [];
+        const role = user.role.toUpperCase();
+        if (role === 'DOCTOR' || role === 'ADMINISTRATOR' || role === 'EMERGENCY COORDINATOR' || role === 'HOSPITAL MANAGER' || role === 'OBSERVER') {
           return [
             { id: 'TAB_A', icon: <Icons.Grid />, label: 'Overview' },
             { id: 'TAB_B', icon: <Icons.Bed />, label: 'Ward & ICU Beds' },
@@ -628,7 +616,7 @@
             { id: 'TAB_SQL', icon: <Icons.Database />, label: 'SQL Console' },
             { id: 'TAB_BYOK', icon: <Icons.Key />, label: 'BYOK API Panel' }
           ];
-        } else if (user.role === 'NURSE') {
+        } else if (role === 'NURSE') {
           return [
             { id: 'NURSE_WARD', icon: <Icons.User />, label: 'My Ward Patients' },
             { id: 'NURSE_MEDS', icon: <Icons.Wrench />, label: 'Medication Administration' },
@@ -636,14 +624,14 @@
             { id: 'NURSE_BEDS', icon: <Icons.Bed />, label: 'Bed Status' },
             { id: 'TAB_SQL', icon: <Icons.Database />, label: 'SQL Console' }
           ];
-        } else if (user.role === 'RECEPTIONIST') {
+        } else if (role === 'RECEPTIONIST') {
           return [
             { id: 'RECEP_REG', icon: <Icons.User />, label: 'Patient Registration' },
             { id: 'RECEP_BEDS', icon: <Icons.Bed />, label: 'Bed Availability' },
             { id: 'RECEP_DISCHARGE', icon: <Icons.Clock />, label: 'Discharge Summary' },
             { id: 'TAB_SQL', icon: <Icons.Database />, label: 'SQL Console' }
           ];
-        } else if (user.role === 'AMBULANCE') {
+        } else if (role === 'AMBULANCE') {
           return [
             { id: 'AMB_STATUS', icon: <Icons.Ambulance />, label: 'Ambulance Command' }
           ];
@@ -651,7 +639,15 @@
         return [];
       }, [user]);
 
-      const [tab, setTab] = useState(allowedTabs[0].id);
+      const [tab, setTab] = useState(() => {
+        return allowedTabs.length > 0 ? allowedTabs[0].id : '';
+      });
+
+      useEffect(() => {
+        if (allowedTabs.length > 0 && !allowedTabs.find(t => t.id === tab)) {
+          setTab(allowedTabs[0].id);
+        }
+      }, [allowedTabs, tab]);
 
       const activeEmergenciesCount = useMemo(() => {
         return getDoctorEmergencyCases(user, patients).length;
