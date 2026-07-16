@@ -1,106 +1,116 @@
-# NEXUS — Multi-Agent Hospital Emergency Resource Intelligence Platform
+# Multi-Agent Emergency Resource Negotiation Platform
+### Live Command Center for Real-Time Triage Allocation & explainability
 
-NEXUS is a single-file, browser-based simulation of a hospital emergency
-resource management system. It models bed occupancy, patient triage,
-ambulance dispatch coordination, and clinical staff workflows across
-doctors, nurses, receptionists, and paramedics — all within one
-self-contained HTML file.
+A production-grade, multi-agent platform designed for hospital operations during mass emergency incidents. The system resolves overlapping resource bottlenecks (ICU beds, doctors, operating rooms, ventilators, and staff) using a **deterministic multi-criteria Contract Net Protocol (CNP)** negotiation loop, with dynamic LLM explainability integrations (BYOK).
 
-## Overview
+---
 
-The platform demonstrates how a multi-role hospital operations dashboard
-can coordinate patient placement, staff visibility, and diagnostic data in
-real time. It ships as a single `.html` file with no build step: open it
-in a browser and it runs.
+## 🏛️ System Architecture
 
-## Features
+```
+           +---------------------------------------------------------+
+           |               React Command Center Dashboard            |
+           |   (Triage Ingest, Floor Heatmap, Live SVGs, Settings)   |
+           +--------------------+-------------------+----------------+
+                                |                   ^
+                                | HTTP REST         | WebSockets Live
+                                v                   |
+           +--------------------+-------------------+----------------+
+           |                    FastAPI Backend Gate                 |
+           +-----------------------------+---------------------------+
+                                         |
+                       +-----------------+-----------------+
+                       |                                   |
+                       v                                   v
+        +--------------+--------------+     +--------------+--------------+
+        |  Deterministic CNP Engine   |     |    BYOK AI Decision Log     |
+        |  (NetworkX Dependency Graph) |     |  (Dynamic LLMClient Adapter)|
+        +--------------+--------------+     +--------------+--------------+
+                       |                                   |
+                       +-----------------+-----------------+
+                                         |
+                                         v
+                      +------------------+------------------+
+                      |         SQLite / PostgreSQL         |
+                      |   (Secure AES Key Encryption)       |
+                      |   (SHA-256 Cryptographic Audit Chain|
+                      +-------------------------------------+
+```
 
-### 🔄 Persistent Client-Side State
-All application state (patients, beds, staff activity, and session data)
-is synchronized to the browser's `localStorage`, so data survives page
-refreshes and browser restarts without requiring a backend database.
+---
 
-### 🔑 Bring Your Own Key (BYOK)
-An in-app **API Configuration Panel** lets you connect your own OpenAI,
-Anthropic, or custom-endpoint API key.
-- **With an active key:** the system makes live LLM calls to reason
-  about patient placement using current simulated clinical variables.
-- **Without a key:** the system falls back to deterministic, simulated
-  agent telemetry, so the app remains fully functional in demo mode.
+## 🤖 AI Bring Your Own Key (BYOK) Integration
 
-### 🗄️ Embedded SQL Query Console
-A built-in relational query console lets users run SQL-style queries
-directly against the live application state — inspecting patient
-records, bed assignments, and diagnostic schemas without leaving the
-browser.
+> [!IMPORTANT]
+> **AI Operations boundary & Determinism Statement:**
+> 1. The core resource allocation engine is **completely deterministic** and runs independently of LLM availability. It uses mathematical weighting and NetworkX DAG cascade impact checks.
+> 2. AI is strictly decoupled and used exclusively for **decision narrative explanation**, **clinical operations synthesis**, and **incident executive summaries**.
+> 3. If no API key is configured, AI features degrade gracefully, showing a fallback notice, while the EOC queue negotiation continues working at 100% capacity.
 
-### 👥 Role-Based Access
-The app includes seeded demo accounts spanning:
-- **Doctors** across specialties (Emergency Medicine, ICU, Cardiothoracic
-  Surgery, Neurosurgery, General Surgery, Internal Medicine, Orthopedics,
-  Pulmonology, Nephrology, Gastroenterology)
-- **Nurses** across wards
-- **Receptionists**
-- **Ambulance / Paramedic** command view
+### Supported Providers & Models
+*   **Google Gemini:** `gemini-1.5-flash`, `gemini-2.5-flash`
+*   **OpenAI:** `gpt-4o-mini`, `gpt-4o`
+*   **Anthropic Claude:** `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`
 
-Each role sees a tailored dashboard (patient intake, triage boards,
-capacity diagnostics, ambulance divert alerts, etc.).
+### BYOK Setup Instructions
+1. Log in to the application and navigate to the **AI Config (BYOK)** tab.
+2. Select your provider, model name, and paste your API key.
+3. Adjust model temperature and max tokens.
+4. Click **Verify Connection** to execute a live, secure test connection handshake before saving.
+5. Click **Save Configuration** to store parameters. The API key is encrypted using AES-256 (Fernet) at rest.
 
-### 🚑 Ambulance Command & Divert Logic
-A dedicated Ambulance Command tab surfaces live bed occupancy and
-automatically flags a hospital divert protocol when occupancy crosses a
-critical threshold, recommending an alternate branch for incoming
-patients.
+---
 
-## Getting Started
+## 🔒 Cybersecurity Matrix
 
-No installation required.
+*   **Audit Chain Immutability:** Allocations and audit logs are cryptographically linked in a blockchain format where:
+    $$\text{Checksum}_n = \text{SHA-256}(\text{RecordData}_n + \text{Checksum}_{n-1})$$
+    A dedicated `/api/analytics/validate-chain` route dynamically scans and flags any out-of-order manipulation.
+*   **Role-Based Access Control (RBAC):** Endpoints require JWT validation. Clearance mapping:
+    *   *Administrator:* Access to AI configurations, logs, and override options.
+    *   *Emergency Coordinator:* Access to ingest cases, trigger simulations, and override resources.
+    *   *Doctor/Nurse/Manager/Observer:* Read-only command center view.
+*   **Data Security:** Stored API keys are encrypted at rest using a machine-local Fernet token generated dynamically at first boot. No keys are hardcoded or stored in Git.
 
-1. Download `nexus.html` (or whichever filename you saved this as).
-2. Open it directly in any modern browser (Chrome, Edge, Firefox, Safari).
-3. Log in using one of the seeded demo accounts (see below), or configure
-   your own credentials as needed.
+---
 
-There is no server, package manager, or build process — it is a single
-static HTML file using React and Babel loaded from CDN.
+## 🚀 Execution & Deployment
 
-## Demo Accounts
+### Local Development Setup
 
-| Role | Example ID | Password |
-|---|---|---|
-| Doctor | `DR-2025-001` | `Anjali@123` |
-| Nurse | `NR-2025-001` | `Nurse1@123` |
-| Receptionist | `RC-2025-001` | `Recep1@123` |
-| Ambulance | `AM-2025-001` | `Ambu@123` |
+#### 1. Backend Service
+```bash
+cd backend
+pip install -r requirements.txt
+python -m app.db.seed
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+*   API Docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+*   Seed logins (Password is `<username>_user`):
+    *   Admin: `admin` (pwd: `admin_user`)
+    *   Coordinator: `coord` (pwd: `coordinator_user`)
+    *   Clinical Staff: `doctor` (pwd: `doctor_user`), `nurse` (pwd: `nurse_user`)
 
-> ⚠️ These are demo credentials for local testing only. Replace or remove
-> them before any real deployment, and never reuse these values for actual
-> systems handling real patient data.
+#### 2. Frontend Dashboard
+```bash
+cd frontend
+npm install
+npm run dev
+```
+*   App URL: [http://localhost:3000](http://localhost:3000)
 
-## Configuring BYOK
+### Production Docker Deployment
+```bash
+docker-compose up --build -d
+```
+*   Maps frontend to port `3000` and API to `8000`.
+*   Includes automatic health checks and database state persistence.
 
-1. Open the **API Configuration Panel** from the dashboard.
-2. Enter your API key for OpenAI, Anthropic, or a custom endpoint.
-3. Save — the system will begin routing placement decisions through live
-   LLM calls. Clearing the key reverts to simulated telemetry.
+---
 
-Your key is stored client-side only, alongside the rest of the app's
-`localStorage` state.
-
-## Tech Stack
-
-- **React 18** (via CDN, no bundler)
-- **Babel Standalone** for in-browser JSX transpilation
-- **Google Fonts** (Inter, DM Mono)
-- **localStorage** for persistence
-- Vanilla CSS with CSS custom properties for theming
-
-## Project Status / Notes
-
-This is a demonstration / prototype build intended for internal review,
-UX exploration, and workflow simulation. It uses entirely fictional
-patient and staff data and is **not** connected to any real hospital
-system, EHR, or database. It should not be used to store, process, or
-simulate handling of real patient health information.
-
-## License
+## 🧪 Testing Suite
+Execute the automated validation suite verifying agent bidding, dependency DAGs, encryption, and API endpoints:
+```bash
+cd backend
+pytest -v
+```

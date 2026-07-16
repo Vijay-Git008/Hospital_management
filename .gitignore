@@ -1,0 +1,52 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+out/
+
+# Python cache and testing files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.pytest/
+.cache/
+.tox/
+.coverage
+htmlcov/
+nosetests.xml
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Databases and secrets
+backend/emergency.db*
+backend/jwt_secret.enc
+backend/key.enc
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE / OS files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
