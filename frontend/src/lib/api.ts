@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Create API client pointing to FastAPI backend directly (bypassing Vite proxy)
 const api = axios.create({
-  baseURL: 'http://localhost:8080',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080',
   headers: {
     'Content-Type': 'application/json',
   },

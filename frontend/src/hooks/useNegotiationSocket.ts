@@ -8,11 +8,21 @@ export function useNegotiationSocket(onMessageCallback: (data: any) => void) {
     let socketUrl = '';
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     
-    // Check if we are running in dev mode or prod
-    if (import.meta.env.DEV) {
-      socketUrl = `ws://127.0.0.1:8000/ws`;
+    // Use configured VITE_WS_URL if available
+    if (import.meta.env.VITE_WS_URL) {
+      socketUrl = import.meta.env.VITE_WS_URL;
     } else {
-      socketUrl = `${protocol}//${window.location.host}/ws`;
+      // Use configured VITE_API_URL if available, transforming http/https to ws/wss
+      const apiUrl = import.meta.env.VITE_API_URL;
+      if (apiUrl) {
+        socketUrl = apiUrl.replace(/^http/, 'ws').replace(/\/+$/, '') + '/ws';
+      } else if (import.meta.env.DEV) {
+        // Fallback for local development
+        socketUrl = `ws://127.0.0.1:8080/ws`;
+      } else {
+        // Fallback for production (deriving from current host)
+        socketUrl = `${protocol}//${window.location.host}/ws`;
+      }
     }
 
     const connect = () => {
