@@ -58,6 +58,7 @@ class PatientOut(BaseModel):
     status: str
     clinical_data_json: str
     created_at: datetime
+    is_vip: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -85,12 +86,14 @@ class AIConfigCreate(BaseModel):
     api_key: str
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1000, ge=10, le=8000)
+    vip_weight: Optional[float] = 15.0
 
 class AIConfigOut(BaseModel):
     provider: str
     model_name: str
     temperature: float
     max_tokens: int
+    vip_weight: Optional[float] = 15.0
     updated_at: datetime
 
     class Config:
@@ -181,6 +184,7 @@ class PatientRegisterRequest(BaseModel):
     bloodGroup: str
     diagnosis: str
     bedId: str
+    is_vip: Optional[int] = 0
 
 class BedAssignRequest(BaseModel):
     bed_id: str

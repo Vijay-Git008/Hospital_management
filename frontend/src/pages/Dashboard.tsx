@@ -9,7 +9,8 @@ import { ResourcePanel } from '../components/ResourcePanel';
 import { NegotiationTimeline } from '../components/NegotiationTimeline';
 import { ExplainabilityPanel } from '../components/ExplainabilityPanel';
 import { DependencyGraph } from '../components/DependencyGraph';
-import { AlertCircle, RefreshCw, Send, Loader } from 'lucide-react';
+import { BedManagementPanel } from '../components/BedManagementPanel';
+import { AlertCircle, RefreshCw, Send, Loader, Crown, Check } from 'lucide-react';
 
 export function Dashboard() {
   const [cases, setCases] = useState<Patient[]>([]);
@@ -28,6 +29,15 @@ export function Dashboard() {
   const [ingestResources, setIngestResources] = useState<string[]>(['Operating Room', 'Doctor']);
   const [ingesting, setIngesting] = useState(false);
 
+  // VIP Override & Bed Management States
+  const [beds, setBeds] = useState<any[]>([]);
+  const [overrideData, setOverrideData] = useState<any>(null);
+  const [showOverrideModal, setShowOverrideModal] = useState(false);
+  const [activeResTab, setActiveResTab] = useState<'map' | 'beds'>('map');
+  const [selectedCandidateId, setSelectedCandidateId] = useState('');
+  const [selectedDestinationBed, setSelectedDestinationBed] = useState('');
+  const [approvingOverride, setApprovingOverride] = useState(false);
+
   const loadData = useCallback(async () => {
     try {
       const c = await apiService.getCases();
@@ -36,6 +46,11 @@ export function Dashboard() {
       setResources(r);
       const h = await apiService.getNegotiationHistory();
       setHistory(h);
+      
+      const b = await apiService.getBeds();
+      setBeds(b);
+      const override = await apiService.getVIPOverrideCandidates();
+      setOverrideData(override);
       
       // Calculate a local SVG graph fallback if backend graph is not received yet
       // (This will be overwritten by direct websocket state pushes)
@@ -156,6 +171,22 @@ export function Dashboard() {
         <MetricsBar refreshTrigger={refreshTrigger} />
       </div>
 
+      {/* VIP ICU Full Warning Banner */}
+      {overrideData?.icu_full && (
+        <div className="card" style={{ background: 'rgba(235, 87, 87, 0.08)', border: '1px solid var(--color-critical)', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 12px 12px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <AlertCircle style={{ color: 'var(--color-critical)' }} size={20} />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--color-critical)', textTransform: 'uppercase' }}>🚨 ICU Capacity Full — VIP Admission Requirement</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>ICU beds are currently 100% occupied. An incoming VIP requires ICU admission. Doctor intervention is required to evaluate stable candidates.</div>
+            </div>
+          </div>
+          <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '0.75rem', display: 'flex', gap: '4px', alignItems: 'center', background: 'linear-gradient(135deg, #ECC94B 0%, #D69E2E 100%)', color: '#1A202C', border: 'none' }} onClick={() => setShowOverrideModal(true)}>
+            <Crown size={12} /> Evaluate Candidates
+          </button>
+        </div>
+      )}
+
       {/* Main Grid */}
       <div className="dashboard-grid">
         {/* Panel 1: Case Queue */}
@@ -195,15 +226,36 @@ export function Dashboard() {
 
         {/* Right Section: Resources & Explainability */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {/* Panel 4: Resource Floor Map */}
+          {/* Panel 4: Resource Floor Map & Bed Management */}
           <div className="panel" style={{ flex: 1 }}>
-            <div className="panel-header">
-              <span>Resource Status</span>
+            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
+              <div style={{ display: 'flex', gap: '16px' }}>
+                <span 
+                  style={{ cursor: 'pointer', fontWeight: activeResTab === 'map' ? 700 : 500, color: activeResTab === 'map' ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: '0.85rem' }}
+                  onClick={() => setActiveResTab('map')}
+                >
+                  Floor Map
+                </span>
+                <span 
+                  style={{ cursor: 'pointer', fontWeight: activeResTab === 'beds' ? 700 : 500, color: activeResTab === 'beds' ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: '0.85rem' }}
+                  onClick={() => setActiveResTab('beds')}
+                >
+                  Bed Management
+                </span>
+              </div>
             </div>
-            <ResourcePanel 
-              resources={resources} 
-              onOverrideCompleted={() => setRefreshTrigger(p => p + 1)} 
-            />
+            {activeResTab === 'map' ? (
+              <ResourcePanel 
+                resources={resources} 
+                onOverrideCompleted={() => setRefreshTrigger(p => p + 1)} 
+              />
+            ) : (
+              <BedManagementPanel 
+                beds={beds}
+                patients={cases}
+                onTransferCompleted={() => setRefreshTrigger(p => p + 1)}
+              />
+            )}
           </div>
 
           {/* Panel 5: AI Explanation Panel */}
@@ -261,6 +313,115 @@ export function Dashboard() {
           </button>
         </form>
       </div>
+
+      {/* VIP Override Modal */}
+      {showOverrideModal && overrideData && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <div className="panel" style={{ width: '550px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', boxShadow: 'var(--shadow-lg)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '1rem', color: 'var(--color-critical)' }}>
+                <Crown size={18} style={{ color: '#D69E2E' }} /> VIP ICU REALLOCATION DECISION SUPPORT
+              </div>
+              <button className="btn" style={{ padding: '4px 8px' }} onClick={() => setShowOverrideModal(false)}>✕</button>
+            </div>
+
+            <div style={{ background: 'rgba(235, 87, 87, 0.05)', border: '1px solid rgba(235, 87, 87, 0.2)', padding: '12px', borderRadius: '8px', fontSize: '0.8rem', lineHeight: '1.4' }}>
+              <strong>Status:</strong> ICU Capacity is currently at <strong>{overrideData.occupied_icu_beds}/{overrideData.total_icu_beds} beds</strong>. An incoming VIP requires an ICU bed. Manual doctor authorization is required to step-down a stable patient.
+            </div>
+
+            <div>
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase' }}>
+                Select Stable Candidate for Downgrade
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {overrideData.candidates.length === 0 ? (
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center', padding: '16px' }}>
+                    No stable ICU candidates found meeting transfer safety profiles.
+                  </div>
+                ) : (
+                  overrideData.candidates.map((c: any) => {
+                    const isSelected = selectedCandidateId === c.patient_id;
+                    return (
+                      <div 
+                        key={c.patient_id} 
+                        className="card"
+                        style={{ 
+                          cursor: 'pointer', 
+                          borderColor: isSelected ? '#D69E2E' : 'var(--border-color)',
+                          borderLeft: `4px solid ${isSelected ? '#D69E2E' : 'var(--color-success)'}`,
+                          padding: '12px'
+                        }}
+                        onClick={() => {
+                          setSelectedCandidateId(c.patient_id);
+                          setSelectedDestinationBed(c.recommended_destination);
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                          <span style={{ fontWeight: 700, fontSize: '0.8rem' }}>{c.name} ({c.patient_id})</span>
+                          <span className="badge badge-success">Low Transfer Risk</span>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                          <strong>Current ICU Bed:</strong> {c.current_bed} | <strong>Suggested Destination:</strong> {c.recommended_destination}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                          <strong>AI Recommendation Reasoning:</strong> {c.reasoning}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {selectedCandidateId && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  Confirm manual relocation of Candidate <strong>{selectedCandidateId}</strong> to Bed <strong>{selectedDestinationBed}</strong> to allocate ICU Bed to the VIP Patient.
+                </div>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ background: 'linear-gradient(135deg, #ECC94B 0%, #D69E2E 100%)', color: '#1A202C', border: 'none', display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center' }}
+                  disabled={approvingOverride}
+                  onClick={async () => {
+                    setApprovingOverride(true);
+                    try {
+                      const candidate = overrideData.candidates.find((x: any) => x.patient_id === selectedCandidateId);
+                      const targetIcuBedId = candidate.current_bed;
+                      
+                      const vipPatient = cases.find(p => p.is_vip === 1 && p.status === 'Pending');
+                      if (!vipPatient) {
+                        alert('No pending VIP patient found in queue.');
+                        return;
+                      }
+
+                      await apiService.approveVIPOverride(
+                        vipPatient.id,
+                        selectedCandidateId,
+                        targetIcuBedId,
+                        selectedDestinationBed
+                      );
+
+                      setShowOverrideModal(false);
+                      setSelectedCandidateId('');
+                      setSelectedDestinationBed('');
+                      setRefreshTrigger(prev => prev + 1);
+                      alert('VIP Override approved and executed successfully! Relocation logged to audit logs.');
+                    } catch (e: any) {
+                      console.error(e);
+                      alert(e.response?.data?.detail || 'Approval failed. Verify Doctor role privileges.');
+                    } finally {
+                      setApprovingOverride(false);
+                    }
+                  }}
+                >
+                  {approvingOverride ? <Loader size={14} className="animate-spin" /> : <Check size={14} />} Approve & Reallocate Bed
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

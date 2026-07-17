@@ -58,6 +58,7 @@ class Patient(Base):
     status = Column(String(50), default="Pending")  # Pending, Allocated, Discharged
     clinical_data_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    is_vip = Column(Integer, default=0)
 
     # NEXUS specific fields (nullable for backward compatibility with tests/existing seeds)
     name = Column(String(100), nullable=True)
@@ -166,6 +167,7 @@ class AIConfiguration(Base):
     api_key_encrypted = Column(Text, nullable=False)
     temperature = Column(Float, default=0.2)
     max_tokens = Column(Integer, default=1000)
+    vip_weight = Column(Float, default=15.0)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 class Bed(Base):

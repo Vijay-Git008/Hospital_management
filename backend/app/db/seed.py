@@ -195,6 +195,7 @@ def seed_db():
         nexus_patients_data = [
             {
                 "id": "P-024", "name": "John Doe", "age": 45, "gender": "M", "bloodGroup": "O+", 
+                "is_vip": 1,
                 "diagnosis": "Tension Pneumothorax", "mechanism": "RTA", "admittedAt": 1, 
                 "attendingDoctor": "DR-2025-001", "consultedDoctors": ["DR-2025-003"], "bedId": "EM-01", 
                 "status": "CRITICAL", 
@@ -373,7 +374,8 @@ def seed_db():
                 tests=json.dumps(p_data["tests"]),
                 aiSummary=json.dumps(p_data["aiSummary"]),
                 med=json.dumps(p_data["med"]),
-                notes=None
+                notes=None,
+                is_vip=p_data.get("is_vip", 0)
             )
             db.add(patient)
         db.flush()

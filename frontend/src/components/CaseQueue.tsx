@@ -52,25 +52,43 @@ export function CaseQueue({ cases, onSelectCase, selectedCaseId }: CaseQueueProp
           const clinical = JSON.parse(c.clinical_data_json || '{}');
           const isSelected = c.id === selectedCaseId;
 
-          return (
-            <div 
-              key={c.id} 
-              className="card"
-              style={{ 
-                cursor: 'pointer',
-                borderColor: isSelected ? 'var(--color-accent)' : 'var(--border-color)',
-                borderLeft: `4px solid ${c.status === 'Allocated' ? 'var(--color-success)' : c.triage_level === 1 ? 'var(--color-critical)' : 'var(--color-warning)'}`
-              }}
-              onClick={() => onSelectCase(c)}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
-                <span className="card-title" style={{ fontFamily: 'var(--font-mono)' }}>{c.name_encrypted}</span>
-                {getTriageBadge(c.triage_level)}
-              </div>
-              
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px', lineHeight: '1.4' }}>
-                {clinical.summary || 'Critical operation pending'}
-              </div>
+            return (
+              <div 
+                key={c.id} 
+                className="card"
+                style={{ 
+                  cursor: 'pointer',
+                  borderColor: isSelected ? 'var(--color-accent)' : 'var(--border-color)',
+                  borderLeft: `4px solid ${c.is_vip === 1 ? '#D69E2E' : c.status === 'Allocated' ? 'var(--color-success)' : c.triage_level === 1 ? 'var(--color-critical)' : 'var(--color-warning)'}`
+                }}
+                onClick={() => onSelectCase(c)}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {c.is_vip === 1 && (
+                      <span style={{ 
+                        background: 'linear-gradient(135deg, #ECC94B 0%, #D69E2E 100%)', 
+                        color: '#1A202C', 
+                        fontSize: '0.65rem', 
+                        fontWeight: 800, 
+                        padding: '2px 5px', 
+                        borderRadius: '4px',
+                        border: '1px solid #C05621',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '2px'
+                      }}>
+                        👑 VIP
+                      </span>
+                    )}
+                    <span className="card-title" style={{ fontFamily: 'var(--font-mono)' }}>{c.name_encrypted}</span>
+                  </div>
+                  {getTriageBadge(c.triage_level)}
+                </div>
+                
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px', lineHeight: '1.4' }}>
+                  {clinical.summary || 'Critical operation pending'}
+                </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span className="card-meta" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

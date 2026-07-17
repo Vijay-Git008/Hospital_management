@@ -13,9 +13,17 @@ export interface Patient {
   name_encrypted: string;
   triage_level: number;
   admission_time: string;
-  status: 'Pending' | 'Allocated' | 'Discharged';
+  status: 'Pending' | 'Allocated' | 'Discharged' | 'CRITICAL' | 'STABLE' | 'MODERATE';
   clinical_data_json: string;
   created_at: string;
+  is_vip?: number;
+  name?: string;
+  age?: number;
+  gender?: string;
+  diagnosis?: string;
+  bedId?: string | null;
+  vitals?: string;
+  attendingDoctor?: string | null;
 }
 
 export interface Incident {

@@ -144,5 +144,56 @@ export const apiService = {
       temperature
     });
     return res.data;
+  },
+
+  // VIP ICU Override Workflow
+  async getVIPOverrideCandidates() {
+    const res = await api.get('/api/nexus/vip-override/candidates');
+    return res.data;
+  },
+
+  async approveVIPOverride(vipPatientId: string, stablePatientId: string, targetIcuBedId: string, relocationBedId: string) {
+    const res = await api.post('/api/nexus/vip-override/approve', {
+      vip_patient_id: vipPatientId,
+      stable_patient_id: stablePatientId,
+      target_icu_bed_id: targetIcuBedId,
+      relocation_bed_id: relocationBedId
+    });
+    return res.data;
+  },
+
+  // Bed Reassignment & Floor Management
+  async getBeds() {
+    const res = await api.get('/api/nexus/beds');
+    return res.data;
+  },
+
+  async assignBed(patientId: string, bedId: string) {
+    const res = await api.post('/api/nexus/beds/assign', {
+      patient_id: patientId,
+      bed_id: bedId
+    });
+    return res.data;
+  },
+
+  // Role-Specific Notification Engine
+  async getNotifications() {
+    const res = await api.get('/api/nexus/notifications');
+    return res.data;
+  },
+
+  async getUnreadNotificationCount() {
+    const res = await api.get('/api/nexus/notifications/unread-count');
+    return res.data;
+  },
+
+  async markNotificationAsRead(id: string) {
+    const res = await api.post(`/api/nexus/notifications/${id}/read`);
+    return res.data;
+  },
+
+  async markAllNotificationsAsRead() {
+    const res = await api.post('/api/nexus/notifications/read-all');
+    return res.data;
   }
 };

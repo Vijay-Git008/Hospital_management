@@ -1,4 +1,4 @@
-def calculate_priority_score(triage_level: int, waiting_time_minutes: float, suitability_score: float, downstream_impact_count: int) -> dict:
+def calculate_priority_score(triage_level: int, waiting_time_minutes: float, suitability_score: float, downstream_impact_count: int, is_vip: int = 0, vip_weight: float = 15.0) -> dict:
     """
     Computes a multi-criteria priority score.
     Returns the total score and a detailed breakdown of sub-metrics.
@@ -28,8 +28,11 @@ def calculate_priority_score(triage_level: int, waiting_time_minutes: float, sui
         (w_impact * impact_penalty)
     )
 
-    # Keep within [0, 100] limits
-    total_score = max(0.0, min(total_score, 100.0))
+    if is_vip:
+        total_score += vip_weight
+
+    # Keep within limits
+    total_score = max(0.0, min(total_score, 100.0 + vip_weight))
 
     return {
         "total_score": round(total_score, 2),

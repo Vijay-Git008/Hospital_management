@@ -76,7 +76,8 @@ def list_patients(db: Session = Depends(get_db), current_user: User = Depends(ge
             "tests": tests_val,
             "aiSummary": ai_summary_val,
             "med": med_val,
-            "notes": p.notes
+            "notes": p.notes,
+            "is_vip": p.is_vip or 0
         })
     return result
 
@@ -118,7 +119,8 @@ def register_patient(payload: PatientRegisterRequest, db: Session = Depends(get_
         ]),
         aiSummary=json.dumps({"stage": "Stable", "trajectory": "Initial assessment", "priorities": ["Baseline checks"], "resources": {"icu": "Not required", "vent": "Not required", "surg": "None"}, "flags": []}),
         med=json.dumps([]),
-        notes=None
+        notes=None,
+        is_vip=payload.is_vip or 0
     )
     db.add(patient)
 

@@ -1,7 +1,7 @@
 import datetime
 import json
 from sqlalchemy.orm import Session
-from ..db.models import Resource, Patient, Incident, Negotiation, NegotiationStep, Allocation, AuditRecord
+from ..db.models import Resource, Patient, Incident, Negotiation, NegotiationStep, Allocation, AuditRecord, AIConfiguration
 from ..agents.case_agent import CaseAgent
 from ..agents.resource_agents import ResourceAgent
 from .dependency_graph import ResourceDependencyGraph
@@ -30,6 +30,10 @@ class NegotiationEngine:
 
         if not pending_patients:
             return
+
+        # Fetch configuration for VIP weight
+        ai_config = db.query(AIConfiguration).first()
+        vip_weight = ai_config.vip_weight if (ai_config and ai_config.vip_weight is not None) else 15.0
 
         # Load resources and allocations
         resources = db.query(Resource).all()
@@ -138,7 +142,9 @@ class NegotiationEngine:
                         triage_level=p.triage_level,
                         waiting_time_minutes=waiting_minutes,
                         suitability_score=suitability,
-                        downstream_impact_count=impact_count
+                        downstream_impact_count=impact_count,
+                        is_vip=getattr(p, "is_vip", 0) or 0,
+                        vip_weight=vip_weight
                     )
 
                     score = scoring_res["total_score"]
