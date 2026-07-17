@@ -143,7 +143,7 @@ export function Dashboard() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
               WebSocket Feed: {connected ? (
-                <span className="badge badge-success">Live Connected</span>
+                <span className="badge badge-success">Connected</span>
               ) : (
                 <span className="badge badge-critical">Disconnected</span>
               )}
@@ -176,7 +176,7 @@ export function Dashboard() {
           {/* Panel 2: Dependency Graph */}
           <div className="panel" style={{ flex: 1 }}>
             <div className="panel-header">
-              <span>Negotiation Dependency Graph</span>
+              <span>CRO Engine Resource Allocation Graph</span>
             </div>
             <DependencyGraph graphData={graphData} />
           </div>
@@ -184,7 +184,7 @@ export function Dashboard() {
           {/* Panel 3: Negotiation Timeline */}
           <div className="panel" style={{ height: '220px' }}>
             <div className="panel-header">
-              <span>Agent CNP Negotiation Log Stream</span>
+              <span>CRO Engine Process Log Stream</span>
             </div>
             <NegotiationTimeline 
               negotiationId={selectedNegotiation?.id} 
@@ -209,7 +209,7 @@ export function Dashboard() {
           {/* Panel 5: AI Explanation Panel */}
           <div className="panel" style={{ height: '320px' }}>
             <div className="panel-header">
-              <span>AI Decision Reasoning</span>
+              <span>CRO Engine Decision Reasoning</span>
             </div>
             <ExplainabilityPanel negotiation={selectedNegotiation} />
           </div>

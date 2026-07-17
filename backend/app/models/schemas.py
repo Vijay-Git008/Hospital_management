@@ -198,8 +198,17 @@ class BYOKConfigSave(BaseModel):
     model: str
     endpoint: Optional[str] = None
 
-class SQLConsoleQuery(BaseModel):
-    query: str
-
-class AINegotiationRequest(BaseModel):
+class CROEngineRequest(BaseModel):
     patient_id: str
+
+class NotificationOut(BaseModel):
+    id: str
+    role: Optional[str] = None
+    text: str
+    severity: str
+    is_read: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+

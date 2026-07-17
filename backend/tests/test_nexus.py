@@ -172,32 +172,23 @@ def test_patient_crud_operations(client):
     assert icu_bed["status"] == "AVAILABLE"
     assert icu_bed["patientId"] is None
 
-def test_secure_sql_console_validation(client):
+def test_notifications_api(client):
     login_res = client.post("/api/auth/login", data={"username": "DR-2025-001", "password": "Anjali@123"})
     token = login_res.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
     
-    # Allowed SELECT query
-    res = client.post("/api/nexus/sql-console", json={"query": "SELECT id, name, status FROM patients"}, headers=headers)
+    # 1. Fetch notifications
+    res = client.get("/api/nexus/notifications", headers=headers)
     assert res.status_code == 200
     data = res.json()
-    assert "headers" in data
-    assert "rows" in data
-    assert len(data["rows"]) == 1
+    assert isinstance(data, list)
     
-    # Allowed UPDATE query
-    res = client.post("/api/nexus/sql-console", json={"query": "UPDATE patients SET status = 'STABLE' WHERE id = 'P-024'"}, headers=headers)
+    # 2. Get unread count
+    res = client.get("/api/nexus/notifications/unread-count", headers=headers)
     assert res.status_code == 200
-    
-    # Blocked dangerous query (DELETE)
-    res = client.post("/api/nexus/sql-console", json={"query": "DELETE FROM patients"}, headers=headers)
-    assert res.status_code == 400
-    assert "SELECT and UPDATE" in res.json()["detail"]
-    
-    # Blocked query targeting users table
-    res = client.post("/api/nexus/sql-console", json={"query": "SELECT * FROM users"}, headers=headers)
-    assert res.status_code == 400
-    assert "Access denied" in res.json()["detail"]
+    count_data = res.json()
+    assert "count" in count_data
+
 
 def test_byok_api_key_encryption_decryption(db_session):
     secret_key = "sk-proj-super-secret-key-12345"

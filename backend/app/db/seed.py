@@ -2,7 +2,7 @@ import datetime
 import json
 import bcrypt
 from .database import Base, engine, SessionLocal
-from .models import Hospital, User, Resource, Patient, Incident, Allocation, AuditRecord, Bed, Ventilator, NexusAuditLog, NexusLastAlert
+from .models import Hospital, User, Resource, Patient, Incident, Allocation, AuditRecord, Bed, Ventilator, NexusAuditLog, NexusLastAlert, Notification
 
 def get_password_hash(password: str) -> str:
     salt = bcrypt.gensalt()
@@ -424,6 +424,16 @@ def seed_db():
             )
             db.add(vent)
 
+        # Seed initial notifications
+        notifications = [
+            Notification(role="Doctor", text="Critical intake alert: Inbound patient P-024 (Tension Pneumothorax) needs urgent review.", severity="critical"),
+            Notification(role="Nurse", text="Bed Assignment update: Patient Sarah Smith (P-021) assigned to bed ICU-02.", severity="info"),
+            Notification(role="Receptionist", text="Discharge checklist ready for patient William Wilson (P-015).", severity="warning"),
+            Notification(role="Administrator", text="System Diagnostics: Connected successfully to database backup.", severity="info")
+        ]
+        for n in notifications:
+            db.add(n)
+ 
         db.commit()
         print("Database seeded successfully with Hospital, Users, and Resource Inventory.")
 

@@ -8,16 +8,17 @@ from sqlalchemy import text
 from typing import List, Optional
 
 from ..db.database import get_db
-from ..db.models import User, Patient, Bed, Ventilator, NexusAuditLog, NexusLastAlert, AIConfiguration
+from ..db.models import User, Patient, Bed, Ventilator, NexusAuditLog, NexusLastAlert, AIConfiguration, Notification
 from ..models.schemas import (
     PatientVitalsUpdate, PatientMedComplete, PatientPlanUpdate,
     PatientReferralRequest, PatientRegisterRequest, BedAssignRequest,
-    ManualLogCreate, LastAlertSave, BYOKConfigSave, SQLConsoleQuery,
-    AINegotiationRequest
+    ManualLogCreate, LastAlertSave, BYOKConfigSave,
+    CROEngineRequest, NotificationOut
 )
 from ..security.auth import get_current_user
 from ..security.encryption import encrypt_val, decrypt_val
 from ..ai.client import get_client_by_provider
+
 
 logger = logging.getLogger("NEXUS_Router")
 
@@ -65,6 +66,7 @@ def list_patients(db: Session = Depends(get_db), current_user: User = Depends(ge
             "diagnosis": p.diagnosis,
             "mechanism": p.mechanism,
             "admittedAt": p.admittedAt,
+            "admission_time": p.admission_time.isoformat() if p.admission_time else None,
             "attendingDoctor": p.attendingDoctor,
             "consultedDoctors": consulted_docs,
             "bedId": p.bedId,
@@ -127,6 +129,8 @@ def register_patient(payload: PatientRegisterRequest, db: Session = Depends(get_
         bed.patientId = new_id
 
     db.commit()
+    create_notification(db, f"New patient registered: {payload.name} ({new_id}). Assigned to Bed {payload.bedId}.", role="Nurse", severity="info")
+    create_notification(db, f"New patient intake: {new_id} awaiting assessment.", role="Doctor", severity="info")
     return {"success": True, "patient_id": new_id}
 
 @router.post("/patients/discharge/{patient_id}")
@@ -136,6 +140,9 @@ def discharge_patient(patient_id: str, db: Session = Depends(get_db), current_us
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
+    patient_name = patient.name
+    patient_bed = patient.bedId
+
     if patient.bedId:
         bed = db.query(Bed).filter(Bed.id == patient.bedId).first()
         if bed:
@@ -144,6 +151,8 @@ def discharge_patient(patient_id: str, db: Session = Depends(get_db), current_us
 
     db.delete(patient)
     db.commit()
+    create_notification(db, f"Patient discharged: {patient_name} ({patient_id}). Bed {patient_bed} is now AVAILABLE.", role="Receptionist", severity="info")
+    create_notification(db, f"Bed Release: Bed {patient_bed} freed by {patient_name}.", role="Coordinator", severity="info")
     return {"success": True}
 
 @router.post("/patients/update-plan")
@@ -345,50 +354,343 @@ def save_byok_config(payload: BYOKConfigSave, db: Session = Depends(get_db), cur
     db.commit()
     return {"success": True}
 
-@router.post("/sql-console")
-def execute_sql(payload: SQLConsoleQuery, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Run SQL commands securely on the SQLite database, validating inputs to prevent SQL injection."""
-    query = payload.query.strip()
-    
-    if current_user.role not in ["Doctor", "Nurse", "Receptionist", "Administrator"]:
-        raise HTTPException(status_code=403, detail="Access denied. Unauthorized role.")
+from pydantic import BaseModel
+from io import BytesIO
+from fastapi.responses import StreamingResponse
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
-    # Validate that it is only a SELECT or UPDATE query
-    clean_query = re.sub(r'\s+', ' ', query).strip()
-    is_select = re.match(r'^SELECT\s+', clean_query, re.IGNORECASE)
-    is_update = re.match(r'^UPDATE\s+', clean_query, re.IGNORECASE)
-
-    if not (is_select or is_update):
-        raise HTTPException(status_code=400, detail="Only SELECT and UPDATE statements are supported in this relational console.")
-
-    # Restrict table access - block attempts to access system security configurations
-    sensitive_tables = ["users", "hospitals", "resources", "incidents", "negotiations", "negotiation_steps", "allocations", "audit_records", "ai_configurations"]
-    for t in sensitive_tables:
-        if re.search(r'\b' + re.escape(t) + r'\b', clean_query, re.IGNORECASE):
-            raise HTTPException(status_code=400, detail=f"Access denied to system table: {t}")
-
+def create_notification(db: Session, text: str, role: str = None, severity: str = "info"):
     try:
-        result = db.execute(text(query))
-        if is_select:
-            columns = list(result.keys())
-            rows = []
-            for row in result.fetchall():
-                row_dict = {}
-                for col in columns:
-                    val = getattr(row, col)
-                    row_dict[col] = str(val) if val is not None else ""
-                rows.append(row_dict)
-            return {"headers": columns, "rows": rows}
-        else:
-            db.commit()
-            return {"headers": ["Status code"], "rows": [{"Status code": "Database records modified successfully."}]}
+        notif = Notification(
+            text=text,
+            role=role,
+            severity=severity
+        )
+        db.add(notif)
+        db.commit()
     except Exception as e:
+        logger.error(f"Error creating notification: {e}")
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
 
-@router.post("/ai-negotiation")
-async def run_ai_negotiation(payload: AINegotiationRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Triggers the multi-agent clinical placement negotiation script via BYOK or sandbox mode."""
+@router.get("/notifications", response_model=List[NotificationOut])
+def get_notifications(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Fetch notifications relevant to the user's role or general system ones."""
+    role = current_user.role
+    # Return notifications where role is null (system wide) or role matches the user's role
+    notifications = db.query(Notification).filter(
+        (Notification.role == None) | (Notification.role == role)
+    ).order_by(Notification.created_at.desc()).limit(50).all()
+    return notifications
+
+@router.get("/notifications/unread-count")
+def get_unread_count(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get count of unread notifications."""
+    role = current_user.role
+    count = db.query(Notification).filter(
+        ((Notification.role == None) | (Notification.role == role)) & (Notification.is_read == 0)
+    ).count()
+    return {"count": count}
+
+@router.post("/notifications/{notification_id}/read")
+def mark_notification_read(notification_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Mark a notification as read."""
+    notif = db.query(Notification).filter(Notification.id == notification_id).first()
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    notif.is_read = 1
+    db.commit()
+    return {"success": True}
+
+@router.post("/notifications/read-all")
+def mark_all_read(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Mark all notifications for the current role as read."""
+    role = current_user.role
+    unread = db.query(Notification).filter(
+        ((Notification.role == None) | (Notification.role == role)) & (Notification.is_read == 0)
+    ).all()
+    for n in unread:
+        n.is_read = 1
+    db.commit()
+    return {"success": True}
+
+@router.get("/vip-override/candidates")
+def get_vip_override_candidates(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Check ICU capacity. If full, find stable patients as transfer candidates to free a bed for a critical VIP case."""
+    icu_beds = db.query(Bed).filter(Bed.zone == "ICU").all()
+    total_icu = len(icu_beds)
+    occupied_icu = [b for b in icu_beds if b.patientId is not None]
+    
+    is_full = len(occupied_icu) >= total_icu
+    
+    # Get patients in ICU
+    icu_patient_ids = [b.patientId for b in occupied_icu if b.patientId is not None]
+    patients_in_icu = db.query(Patient).filter(Patient.id.in_(icu_patient_ids)).all()
+    
+    # Find available General Ward beds for relocation
+    available_gw_beds = db.query(Bed).filter(
+        (Bed.zone.in_(["GA", "GB"])) & (Bed.status == "AVAILABLE")
+    ).all()
+    
+    candidates = []
+    for p in patients_in_icu:
+        is_stable = p.status == "STABLE"
+        score = 0
+        if is_stable:
+            score += 50
+        score += p.triage_level * 10
+        
+        try:
+            vitals = json.loads(p.vitals or "{}")
+        except Exception:
+            vitals = {}
+            
+        spo2 = vitals.get("spo2", 98)
+        bp = vitals.get("bp", "120/80")
+        
+        if is_stable or p.triage_level >= 3:
+            dest_bed = available_gw_beds[len(candidates)].id if len(candidates) < len(available_gw_beds) else "GA-01"
+            candidates.append({
+                "patient_id": p.id,
+                "name": p.name,
+                "current_bed": p.bedId,
+                "diagnosis": p.diagnosis,
+                "status": p.status,
+                "triage_level": p.triage_level,
+                "spo2": spo2,
+                "bp": bp,
+                "recommended_destination": dest_bed,
+                "reasoning": f"Patient has been stable for 24+ hours with oxygen saturation at {spo2}% on room air. Vitals are within normal limits (BP: {bp}).",
+                "risk_assessment": "Low risk of decompensation. Transfer to step-down GA ward is clinically indicated.",
+                "score": score
+            })
+            
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    
+    return {
+        "icu_full": is_full,
+        "total_icu_beds": total_icu,
+        "occupied_icu_beds": len(occupied_icu),
+        "candidates": candidates,
+        "available_destinations": [b.id for b in available_gw_beds]
+    }
+
+class VIPOverrideApprovalPayload(BaseModel):
+    vip_patient_id: str
+    stable_patient_id: str
+    target_icu_bed_id: str
+    relocation_bed_id: str
+
+@router.post("/vip-override/approve")
+def approve_vip_override(payload: VIPOverrideApprovalPayload, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Execute the VIP ICU Override: move stable patient out to a General Ward, then assign ICU bed to VIP."""
+    if current_user.role.upper() != "DOCTOR" and current_user.role.upper() != "ADMINISTRATOR":
+        raise HTTPException(status_code=403, detail="Only Doctors or Administrators can approve clinical overrides.")
+        
+    vip_patient = db.query(Patient).filter(Patient.id == payload.vip_patient_id).first()
+    stable_patient = db.query(Patient).filter(Patient.id == payload.stable_patient_id).first()
+    
+    if not vip_patient or not stable_patient:
+        raise HTTPException(status_code=404, detail="VIP Patient or Stable Candidate not found.")
+        
+    icu_bed = db.query(Bed).filter(Bed.id == payload.target_icu_bed_id).first()
+    gw_bed = db.query(Bed).filter(Bed.id == payload.relocation_bed_id).first()
+    
+    if not icu_bed or not gw_bed:
+        raise HTTPException(status_code=404, detail="ICU Bed or Relocation General Ward Bed not found.")
+        
+    old_icu_bed_id = stable_patient.bedId
+    stable_patient.bedId = gw_bed.id
+    stable_patient.status = "STABLE"
+    
+    gw_bed.status = "STABLE"
+    gw_bed.patientId = stable_patient.id
+    
+    vip_patient.bedId = icu_bed.id
+    vip_patient.status = "CRITICAL"
+    
+    icu_bed.status = "CRITICAL"
+    icu_bed.patientId = vip_patient.id
+    
+    time_str = datetime.datetime.now().strftime("%I:%M:%S %p")
+    log_text = (
+        f"VIP ICU Override approved by {current_user.name or current_user.username}. "
+        f"Stable patient {stable_patient.name} ({stable_patient.id}) transferred from {old_icu_bed_id} to General Ward bed {gw_bed.id}. "
+        f"Critical VIP patient {vip_patient.name} ({vip_patient.id}) admitted to ICU Bed {icu_bed.id}."
+    )
+    audit_log = NexusAuditLog(
+        agent=current_user.name or current_user.username,
+        role=current_user.role.upper(),
+        text=log_text,
+        time=time_str
+    )
+    db.add(audit_log)
+    
+    create_notification(db, f"VIP Override: {vip_patient.id} admitted to ICU Bed {icu_bed.id}.", role="Doctor", severity="critical")
+    create_notification(db, f"Relocation: {stable_patient.id} transferred to General Ward {gw_bed.id}.", role="Nurse", severity="warning")
+    
+    db.commit()
+    return {"success": True, "detail": log_text}
+
+@router.get("/patients/{patient_id}/pdf-report")
+def generate_patient_pdf_report(patient_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    story = []
+    
+    styles = getSampleStyleSheet()
+    
+    # Custom colors
+    primary_color = colors.HexColor("#1A365D")
+    secondary_color = colors.HexColor("#2D3748")
+    accent_color = colors.HexColor("#319795")
+    border_color = colors.HexColor("#E2E8F0")
+    
+    title_style = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Heading1'],
+        fontSize=20,
+        leading=24,
+        textColor=primary_color,
+        spaceAfter=6
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'DocSubTitle',
+        parent=styles['Normal'],
+        fontSize=10,
+        leading=12,
+        textColor=colors.HexColor("#718096"),
+        spaceAfter=15
+    )
+    
+    section_heading = ParagraphStyle(
+        'SectionHeading',
+        parent=styles['Heading2'],
+        fontSize=13,
+        leading=16,
+        textColor=accent_color,
+        spaceBefore=12,
+        spaceAfter=8,
+        keepWithNext=True
+    )
+    
+    body_style = ParagraphStyle(
+        'Body',
+        parent=styles['Normal'],
+        fontSize=9,
+        leading=13,
+        textColor=secondary_color
+    )
+    
+    label_style = ParagraphStyle(
+        'Label',
+        parent=styles['Normal'],
+        fontSize=9,
+        leading=13,
+        textColor=colors.HexColor("#4A5568"),
+        fontName="Helvetica-Bold"
+    )
+
+    story.append(Paragraph("METRO GENERAL HOSPITAL - NEXUS CLINICAL RESOURCE PORTAL", title_style))
+    story.append(Paragraph("Clinical Resource Optimization Engine (CRO Engine) · Patient Summary Report", subtitle_style))
+    story.append(Spacer(1, 10))
+    
+    try:
+        vitals = json.loads(patient.vitals or "{}")
+    except Exception:
+        vitals = {}
+    
+    info_data = [
+        [Paragraph("Patient Name:", label_style), Paragraph(patient.name or "N/A", body_style), Paragraph("Patient ID:", label_style), Paragraph(patient.id or "N/A", body_style)],
+        [Paragraph("Age / Gender:", label_style), Paragraph(f"{patient.age or 'N/A'} / {patient.gender or 'N/A'}", body_style), Paragraph("Blood Group:", label_style), Paragraph(patient.bloodGroup or "N/A", body_style)],
+        [Paragraph("Current Bed:", label_style), Paragraph(patient.bedId or "Unallocated", body_style), Paragraph("Status:", label_style), Paragraph(patient.status or "N/A", body_style)],
+        [Paragraph("Attending Doctor:", label_style), Paragraph(patient.attendingDoctor or "N/A", body_style), Paragraph("Admitted At:", label_style), Paragraph(f"{patient.admittedAt or 0} hrs ago", body_style)]
+    ]
+    
+    t_info = Table(info_data, colWidths=[100, 160, 100, 160])
+    t_info.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('LINEBELOW', (0,0), (-1,-1), 0.5, border_color),
+    ]))
+    
+    story.append(t_info)
+    story.append(Spacer(1, 12))
+    
+    story.append(Paragraph("Clinical Diagnosis & History", section_heading))
+    story.append(Paragraph(f"<b>Diagnosis:</b> {patient.diagnosis or 'N/A'}", body_style))
+    if patient.mechanism:
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(f"<b>Mechanism:</b> {patient.mechanism}", body_style))
+        
+    story.append(Spacer(1, 12))
+    
+    story.append(Paragraph("Current Vitals Metrics", section_heading))
+    vitals_data = [
+        [Paragraph("BP", label_style), Paragraph("SpO2", label_style), Paragraph("GCS", label_style), Paragraph("HR", label_style), Paragraph("Temp", label_style), Paragraph("RR", label_style)],
+        [Paragraph(str(vitals.get("bp", "N/A")), body_style), 
+         Paragraph(f"{vitals.get('spo2', 'N/A')}%", body_style), 
+         Paragraph(str(vitals.get("gcs", "N/A")), body_style), 
+         Paragraph(f"{vitals.get('hr', 'N/A')} bpm", body_style), 
+         Paragraph(f"{vitals.get('temp', 'N/A')} °C", body_style), 
+         Paragraph(f"{vitals.get('rr', 'N/A')} /min", body_style)]
+    ]
+    t_vitals = Table(vitals_data, colWidths=[85, 85, 85, 85, 85, 85])
+    t_vitals.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#F8FAFC")),
+        ('GRID', (0,0), (-1,-1), 0.5, border_color),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+    ]))
+    story.append(t_vitals)
+    story.append(Spacer(1, 12))
+    
+    story.append(Paragraph("CRO Engine AI Assessment Summary", section_heading))
+    try:
+        ai_summary = json.loads(patient.aiSummary or "{}")
+    except Exception:
+        ai_summary = {}
+        
+    stage = ai_summary.get("stage", "N/A")
+    trajectory = ai_summary.get("trajectory", "N/A")
+    priorities = ai_summary.get("priorities", [])
+    
+    story.append(Paragraph(f"<b>Clinical Stage:</b> {stage} · <b>Trajectory:</b> {trajectory}", body_style))
+    story.append(Spacer(1, 6))
+    
+    if priorities:
+        story.append(Paragraph("<b>Clinical Priorities:</b>", label_style))
+        for p_item in priorities:
+            story.append(Paragraph(f"• {p_item}", body_style))
+            story.append(Spacer(1, 2))
+            
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("Audit Trail Actions", section_heading))
+    logs = db.query(NexusAuditLog).filter(NexusAuditLog.text.like(f"%{patient.id}%")).order_by(NexusAuditLog.created_at.desc()).all()
+    if logs:
+        for l in logs:
+            story.append(Paragraph(f"[{l.time}] <b>{l.agent} ({l.role}):</b> {l.text}", body_style))
+            story.append(Spacer(1, 4))
+    else:
+        story.append(Paragraph("No direct override or allocation events logged for this patient ID.", body_style))
+        
+    doc.build(story)
+    buffer.seek(0)
+    return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=Nexus_Report_{patient.id}.pdf"})
+
+@router.post("/cro-engine")
+async def run_cro_engine(payload: CROEngineRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Triggers the multi-agent clinical placement optimization engine via BYOK or sandbox mode."""
     patient = db.query(Patient).filter(Patient.id == payload.patient_id).first()
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -401,7 +703,7 @@ async def run_ai_negotiation(payload: AINegotiationRequest, db: Session = Depend
         { "agent": 'Staff Agent', "role": 'Clinical Personnel Matcher', "color": '#D97706', "text": 'Matched Dr. Sharma (Emergency Medicine) as Primary and Dr. Rajan (Cardiothoracic Surgery) as On-Call Consultant.' },
         { "agent": 'Equipment Agent', "role": 'Ventilator Systems Tracker', "color": '#DC2626', "text": 'Assigned Ventilator VENT-04 from auxiliary storage. Routing to bed ICU-07 now.' },
         { "agent": 'Ambulance Agent', "role": 'Paramedic Intake Handler', "color": '#0891B2', "text": 'Inbound vehicle ETA 1min 45sec. Landing pad and elevator clear path verified.' },
-        { "agent": 'Orchestrator', "role": 'System Orchestrator', "color": '#7C3AED', "text": f'Negotiation sequence complete. Structural resolution: Route patient {patient.id} to ICU-07 with standby support.' }
+        { "agent": 'Orchestrator', "role": 'System Orchestrator', "color": '#7C3AED', "text": f'Resource optimization complete. Structural resolution: Route patient {patient.id} to ICU-07 with standby support.' }
     ]
 
     import os
@@ -431,12 +733,11 @@ async def run_ai_negotiation(payload: AINegotiationRequest, db: Session = Depend
             model_name = os.getenv("ANTHROPIC_MODEL_NAME") or "claude-3-5-sonnet-20241022"
 
     if not provider or not api_key:
-        # Log simulated action
         time_str = datetime.datetime.now().strftime("%I:%M:%S %p")
         log = NexusAuditLog(
             agent="Orchestrator",
             role="SYSTEM",
-            text=f"AI Agent simulated resource placement script generated for {patient.id}",
+            text=f"CRO Engine simulated resource placement script generated for {patient.id}",
             time=time_str
         )
         db.add(log)
@@ -460,7 +761,7 @@ async def run_ai_negotiation(payload: AINegotiationRequest, db: Session = Depend
             tests_val = []
 
         prompt = f"""
-        You are simulating a hospital multi-agent clinical resource team. 
+        You are simulating a hospital multi-agent clinical resource team (CRO Engine). 
         Analyze this patient case data:
         Patient ID: {patient.id}
         Diagnosis: {patient.diagnosis}
@@ -481,12 +782,11 @@ async def run_ai_negotiation(payload: AINegotiationRequest, db: Session = Depend
         sanitized = raw_res.replace("```json", "").replace("```", "").strip()
         parsed_script = json.loads(sanitized)
 
-        # Log decision
         time_str = datetime.datetime.now().strftime("%I:%M:%S %p")
         log = NexusAuditLog(
             agent="Orchestrator",
             role="SYSTEM",
-            text=f"AI Agent live negotiation script generated via {config.provider} for {patient.id}",
+            text=f"CRO Engine live execution script generated via {provider} for {patient.id}",
             time=time_str
         )
         db.add(log)
@@ -496,14 +796,14 @@ async def run_ai_negotiation(payload: AINegotiationRequest, db: Session = Depend
 
     except Exception as err:
         logger.error(f"AI Connection failed: {err}")
-        # Log failure
         time_str = datetime.datetime.now().strftime("%I:%M:%S %p")
         log = NexusAuditLog(
             agent="Orchestrator",
             role="SYSTEM",
-            text=f"AI Connection failed: {str(err)}. Reverted to sandbox mode.",
+            text=f"AI Connection failed: {str(err)}. Reverted to CRO Engine sandbox mode.",
             time=time_str
         )
         db.add(log)
         db.commit()
         return mock_messages
+

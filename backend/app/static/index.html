@@ -288,14 +288,30 @@
     };
 
     // --- HOOKS ---
-    function useWaitTimer(startMinutes) {
-      const [seconds, setSeconds] = useState(startMinutes * 60);
+    function useWaitTimer(admissionTimeStr, fallbackHrs = 0) {
+      const getElapsed = useCallback(() => {
+        if (!admissionTimeStr) return fallbackHrs * 3600;
+        const diff = Date.now() - new Date(admissionTimeStr).getTime();
+        return Math.max(0, Math.floor(diff / 1000));
+      }, [admissionTimeStr, fallbackHrs]);
+
+      const [seconds, setSeconds] = useState(getElapsed);
+
       useEffect(() => {
-        const interval = setInterval(() => setSeconds(s => s + 1), 1000);
+        setSeconds(getElapsed());
+        const interval = setInterval(() => {
+          setSeconds(getElapsed());
+        }, 1000);
         return () => clearInterval(interval);
-      }, []);
-      const m = Math.floor(seconds / 60);
+      }, [getElapsed]);
+
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
       const s = seconds % 60;
+      
+      if (h > 0) {
+        return `${h}h ${m}m ${s}s`;
+      }
       return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
 
@@ -498,6 +514,8 @@
       const [manualActions, setManualActions] = useState([]);
       const [lastAlert, setLastAlert] = useState(null);
       const [byokConfig, setByokConfig] = useState({ provider: 'MOCK', apiKey: '', model: '', endpoint: '' });
+      const [notifications, setNotifications] = useState([]);
+      const [unreadCount, setUnreadCount] = useState(0);
 
       const [notificationsOpen, setNotificationsOpen] = useState(false);
       const [modalPatientId, setModalPatientId] = useState(null);
@@ -519,6 +537,8 @@
           const fetchedLogs = await api.request('/api/nexus/logs');
           const fetchedLastAlert = await api.request('/api/nexus/last-alert');
           const fetchedBYOKConfig = await api.request('/api/nexus/byok-config');
+          const fetchedNotifs = await api.request('/api/nexus/notifications');
+          const fetchedUnread = await api.request('/api/nexus/notifications/unread-count');
           
           setPatients(fetchedPatients);
           setBeds(fetchedBeds);
@@ -526,6 +546,8 @@
           setManualActions(fetchedLogs);
           setLastAlert(fetchedLastAlert);
           setByokConfig(fetchedBYOKConfig);
+          setNotifications(fetchedNotifs);
+          setUnreadCount(fetchedUnread.count);
         } catch (e) {
           console.error("Error loading data from backend:", e);
         }
@@ -579,27 +601,23 @@
         return patients.find(p => p.id === modalPatientId);
       }, [patients, modalPatientId]);
 
-      const dynamicNotifications = useMemo(() => {
-        const list = [];
-        patients.filter(p => p.status === 'CRITICAL').forEach(p => {
-          list.push({
-            id: `N-P-${p.id}`,
-            text: `${p.id} — ${p.diagnosis} is currently CRITICAL, awaiting stable allocation`,
-            severity: 'critical',
-            time: 'Live Update'
-          });
-        });
-        const occPercent = Math.round((beds.filter(b => b.status !== 'AVAILABLE').length / beds.length) * 100);
-        if (occPercent >= 80) {
-          list.push({
-            id: 'N-CAP',
-            text: `Critical System Warning: Hospital overall occupancy reached high capacity (${occPercent}%)`,
-            severity: 'warning',
-            time: 'System Alert'
-          });
+      const markNotifRead = async (id) => {
+        try {
+          await api.request(`/api/nexus/notifications/${id}/read`, { method: 'POST' });
+          await loadAllData();
+        } catch (e) {
+          console.error(e);
         }
-        return list;
-      }, [patients, beds]);
+      };
+
+      const markAllNotifsRead = async () => {
+        try {
+          await api.request('/api/nexus/notifications/read-all', { method: 'POST' });
+          await loadAllData();
+        } catch (e) {
+          console.error(e);
+        }
+      };
 
       const allowedTabs = useMemo(() => {
         if (!user || !user.role) return [];
@@ -610,10 +628,9 @@
             { id: 'TAB_B', icon: <Icons.Bed />, label: 'Ward & ICU Beds' },
             { id: 'TAB_C', icon: <Icons.User />, label: 'My Patients' },
             { id: 'TAB_D', icon: <Icons.Alert />, label: 'Emergency Cases' },
-            { id: 'TAB_E', icon: <Icons.Cpu />, label: 'AI Negotiation' },
+            { id: 'TAB_E', icon: <Icons.Cpu />, label: 'Clinical Resource Optimization' },
             { id: 'TAB_F', icon: <Icons.Clock />, label: 'Audit Log' },
             { id: 'TAB_G', icon: <Icons.Ambulance />, label: 'Ambulance Dispatch' },
-            { id: 'TAB_SQL', icon: <Icons.Database />, label: 'SQL Console' },
             { id: 'TAB_BYOK', icon: <Icons.Key />, label: 'BYOK API Panel' }
           ];
         } else if (role === 'NURSE') {
@@ -621,15 +638,13 @@
             { id: 'NURSE_WARD', icon: <Icons.User />, label: 'My Ward Patients' },
             { id: 'NURSE_MEDS', icon: <Icons.Wrench />, label: 'Medication Administration' },
             { id: 'NURSE_VITALS', icon: <Icons.Alert />, label: 'Vitals Entry' },
-            { id: 'NURSE_BEDS', icon: <Icons.Bed />, label: 'Bed Status' },
-            { id: 'TAB_SQL', icon: <Icons.Database />, label: 'SQL Console' }
+            { id: 'NURSE_BEDS', icon: <Icons.Bed />, label: 'Bed Status' }
           ];
         } else if (role === 'RECEPTIONIST') {
           return [
             { id: 'RECEP_REG', icon: <Icons.User />, label: 'Patient Registration' },
             { id: 'RECEP_BEDS', icon: <Icons.Bed />, label: 'Bed Availability' },
-            { id: 'RECEP_DISCHARGE', icon: <Icons.Clock />, label: 'Discharge Summary' },
-            { id: 'TAB_SQL', icon: <Icons.Database />, label: 'SQL Console' }
+            { id: 'RECEP_DISCHARGE', icon: <Icons.Clock />, label: 'Discharge Summary' }
           ];
         } else if (role === 'AMBULANCE') {
           return [
@@ -732,34 +747,39 @@
               <div className="mono text-slate-500" style={{fontSize: 13, color: COLORS.secondary}}>{timeStr}</div>
               
               <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2" style={{fontSize: 13, color: COLORS.primary}}>
-                   NEXUS Central Hub <div style={{width: 6, height: 6, borderRadius: 3, background: COLORS.teal}}></div> Live
+                <div style={{fontSize: 13, color: COLORS.primary, fontWeight: 500}}>
+                   NEXUS Central Hub
                 </div>
                 
                 <div style={{position: 'relative'}}>
                   <div style={{cursor: 'pointer', display: 'flex', alignItems: 'center'}} onClick={() => setNotificationsOpen(!notificationsOpen)}>
                     <Icons.Bell color={COLORS.secondary} />
-                    {dynamicNotifications.length > 0 && (
-                      <div style={{position: 'absolute', top: -4, right: -4, width: 8, height: 8, background: COLORS.critical, borderRadius: '50%'}}></div>
+                    {unreadCount > 0 && (
+                      <div style={{position: 'absolute', top: -8, right: -8, minWidth: 16, height: 16, background: COLORS.critical, borderRadius: 8, color: '#FFF', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px'}}>{unreadCount}</div>
                     )}
                   </div>
                   {notificationsOpen && (
                     <div className="elevated-shadow" style={{position: 'absolute', top: 32, right: 0, background: '#FFF', border: '1px solid #CBD5E1', borderRadius: 8, width: 340, zIndex: 1000, padding: 12}}>
                       <div className="flex justify-between items-center" style={{paddingBottom: 8, borderBottom: '1px solid #E2E8F0', marginBottom: 8}}>
-                        <span style={{fontWeight: 600, fontSize: 13}}>Dynamic Allocation Signals</span>
-                        <span onClick={() => setNotificationsOpen(false)} style={{fontSize: 11, color: COLORS.transfer, cursor: 'pointer'}}>Close</span>
+                        <span style={{fontWeight: 600, fontSize: 13}}>Clinical Notifications</span>
+                        <div style={{display: 'flex', gap: 8}}>
+                          {unreadCount > 0 && (
+                            <span onClick={markAllNotifsRead} style={{fontSize: 11, color: COLORS.transfer, cursor: 'pointer', fontWeight: 500}}>Mark all read</span>
+                          )}
+                          <span onClick={() => setNotificationsOpen(false)} style={{fontSize: 11, color: COLORS.secondary, cursor: 'pointer'}}>Close</span>
+                        </div>
                       </div>
                       <div className="flex-col gap-2" style={{maxHeight: 280, overflowY: 'auto'}}>
-                        {dynamicNotifications.length === 0 ? (
-                          <div style={{fontSize: 11, color: COLORS.secondary, padding: '12px 0', textAlign: 'center'}}>No telemetry warning codes.</div>
+                        {notifications.length === 0 ? (
+                          <div style={{fontSize: 11, color: COLORS.secondary, padding: '12px 0', textAlign: 'center'}}>No clinical alerts.</div>
                         ) : (
-                          dynamicNotifications.map((n, i) => (
-                            <div key={i} style={{padding: '8px 4px', borderBottom: '1px solid #F1F5F9', display: 'flex', flexDirection: 'column', gap: 4}}>
+                          notifications.map((n) => (
+                            <div key={n.id} onClick={() => n.is_read === 0 && markNotifRead(n.id)} style={{padding: '8px 4px', borderBottom: '1px solid #F1F5F9', display: 'flex', flexDirection: 'column', gap: 4, cursor: n.is_read === 0 ? 'pointer' : 'default', opacity: n.is_read === 1 ? 0.6 : 1, background: n.is_read === 0 ? '#F8FAFC' : 'transparent'}}>
                               <div className="flex items-start gap-2">
-                                <div style={{width: 8, height: 8, borderRadius: '50%', marginTop: 4, flexShrink: 0, background: n.severity === 'critical' ? COLORS.critical : COLORS.warning}}></div>
+                                <div style={{width: 8, height: 8, borderRadius: '50%', marginTop: 4, flexShrink: 0, background: n.severity === 'critical' ? COLORS.critical : n.severity === 'warning' ? COLORS.warning : COLORS.teal}}></div>
                                 <span style={{fontSize: 12, color: COLORS.primary, wordBreak: 'break-word', whiteSpace: 'normal', lineHeight: '1.35'}}>{n.text}</span>
                               </div>
-                              <span style={{fontSize: 10, color: COLORS.secondary, paddingLeft: 14}}>{n.time}</span>
+                              <span style={{fontSize: 9, color: COLORS.muted, paddingLeft: 14}}>{new Date(n.created_at).toLocaleTimeString()} {n.is_read === 0 && ' (New)'}</span>
                             </div>
                           ))
                         )}
@@ -784,16 +804,13 @@
                 <EmergencyCasesTab doctor={user} patients={patients} beds={beds} triggerSave={triggerSave} ventilators={ventilators} />
               )}
               {tab === 'TAB_E' && (
-                <AINegotiationTab config={byokConfig} triggerToast={triggerToast} patients={patients} beds={beds} />
+                <CROEngineTab config={byokConfig} triggerToast={triggerToast} patients={patients} beds={beds} />
               )}
               {tab === 'TAB_F' && (
                 <AuditTab aiEntries={AI_AGENT_LOGS} manualEntries={manualActions} />
               )}
               {tab === 'TAB_G' && (
                 <AmbulanceDispatchTab patients={patients} beds={beds} triggerSave={triggerSave} lastAlert={lastAlert} setLastAlert={setLastAlert} ventilators={ventilators} />
-              )}
-              {tab === 'TAB_SQL' && (
-                <SQLConsoleTab patients={patients} beds={beds} ventilators={ventilators} triggerSave={triggerSave} />
               )}
               {tab === 'TAB_BYOK' && (
                 <BYOKConfigTab config={byokConfig} onSave={saveBYOKConfig} />
@@ -894,7 +911,7 @@
                     <div className="flex items-center justify-center" style={{width: 36, height: 36, borderRadius: '50%', background: `${e.color}15`, color: e.color, fontWeight: 600, fontSize: 12, border: `1.5px solid ${e.color}`}}>{e.agent[0]}</div>
                     <div className="flex-col">
                       <div style={{fontWeight: 500, fontSize: 13, color: COLORS.primary}}>{e.text}</div>
-                      <div style={{fontSize: 11, color: COLORS.secondary, marginTop: 4}}>{e.agent} · Conf: {e.conf} · {e.time}</div>
+                      <div style={{fontSize: 11, color: COLORS.secondary, marginTop: 4}}>{e.agent} · Match Confidence: {e.conf} · {e.time}</div>
                     </div>
                   </div>
                 ))}
@@ -955,6 +972,52 @@
       const [filterZone, setFilterZone] = useState('All Wards');
       const [assigningBed, setAssigningBed] = useState(null);
       const [searchQuery, setSearchQuery] = useState('');
+      const [overrideModalOpen, setOverrideModalOpen] = useState(false);
+      const [overrideData, setOverrideData] = useState(null);
+      const [vipPatientId, setVipPatientId] = useState('');
+      const [approving, setApproving] = useState(false);
+
+      const icuBeds = beds.filter(b => b.zone === 'ICU');
+      const icuFull = icuBeds.length > 0 && icuBeds.filter(b => b.patientId !== null).length >= icuBeds.length;
+
+      const handleScanOverrideCandidates = async () => {
+        try {
+          const res = await api.request('/api/nexus/vip-override/candidates');
+          setOverrideData(res);
+          const pendingVIPs = patients.filter(p => p.status === 'CRITICAL' && (!p.bedId || p.bedId.startsWith('EM')));
+          if (pendingVIPs.length > 0) {
+            setVipPatientId(pendingVIPs[0].id);
+          }
+          setOverrideModalOpen(true);
+        } catch (e) {
+          alert('Failed to scan candidates: ' + e.message);
+        }
+      };
+
+      const handleApproveOverride = async (candidateId, targetBedId, destinationBedId) => {
+        if (!vipPatientId) {
+          alert('Please select a VIP patient requiring ICU admission.');
+          return;
+        }
+        setApproving(true);
+        try {
+          await api.request('/api/nexus/vip-override/approve', {
+            method: 'POST',
+            body: JSON.stringify({
+              vip_patient_id: vipPatientId,
+              stable_patient_id: candidateId,
+              target_icu_bed_id: targetBedId,
+              relocation_bed_id: destinationBedId
+            })
+          });
+          setOverrideModalOpen(false);
+          await triggerSave(null, null, null, `Approved VIP ICU Override. Transferred stable patient ${candidateId} to ward bed ${destinationBedId} to admit VIP patient ${vipPatientId} to bed ${targetBedId}.`);
+        } catch (e) {
+          alert('Failed to approve override: ' + e.message);
+        } finally {
+          setApproving(false);
+        }
+      };
 
       const filteredBeds = useMemo(() => {
         if (filterZone === 'All Wards') return beds;
@@ -991,6 +1054,71 @@
 
       return (
         <div className="flex-col gap-6">
+          {icuFull && (
+            <div style={{background: COLORS.critBg, border: `1px solid ${COLORS.critBorder}`, color: COLORS.critical, padding: 16, borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16}}>
+              <div>
+                <strong>⚠ CRITICAL ICU OVERLOAD STATUS DETECTED</strong>
+                <p style={{fontSize: 12, marginTop: 4, color: COLORS.secondary}}>ICU capacity is at 100%. A VIP ICU override protocol may be executed to transfer stable candidates to general wards.</p>
+              </div>
+              <button onClick={handleScanOverrideCandidates} style={{background: COLORS.critical, color: '#FFF', border: 'none', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 600}}>Scan Stable Candidates</button>
+            </div>
+          )}
+
+          {overrideModalOpen && overrideData && (
+            <div className="flex items-center justify-center w-full h-full" style={{position: 'fixed', top: 0, left: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center'}}>
+              <div className="flex-col card-shadow text-black" style={{background: '#FFF', borderRadius: 16, width: '95vw', maxWidth: 650, padding: 32, display: 'flex', flexDirection: 'column', maxHeight: '85vh', overflowY: 'auto'}}>
+                <div className="flex justify-between items-center mb-4">
+                  <span style={{fontWeight: 700, fontSize: 18}}>ICU VIP Override Transfer Candidates</span>
+                  <span onClick={() => setOverrideModalOpen(false)} style={{cursor: 'pointer', fontSize: 18, color: COLORS.secondary}}>✕</span>
+                </div>
+                
+                <div style={{marginBottom: 16}}>
+                  <label style={{fontSize: 12, fontWeight: 'bold', display: 'block', marginBottom: 6}}>SELECT CRITICAL PATIENT REQUIRING ICU BED</label>
+                  <select value={vipPatientId} onChange={e=>setVipPatientId(e.target.value)} style={{height: 40, border: '1px solid #CBD5E1', borderRadius: 6, padding: '0 12px', width: '100%'}}>
+                    <option value="">-- Select Patient --</option>
+                    {patients.filter(p => p.status === 'CRITICAL' && (!p.bedId || p.bedId.startsWith('EM'))).map(p => (
+                      <option key={p.id} value={p.id}>{p.id} - {p.name} ({p.diagnosis})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{fontSize: 12, color: COLORS.secondary, marginBottom: 12}}>
+                  The optimization engine has identified the following stable ICU candidates suitable for step-down transfer:
+                </div>
+
+                <div className="flex-col gap-3">
+                  {overrideData.candidates.length === 0 ? (
+                    <div style={{textAlign: 'center', padding: '24px', color: COLORS.muted}}>No stable transfer candidates found in ICU.</div>
+                  ) : (
+                    overrideData.candidates.map(c => (
+                      <div key={c.patient_id} style={{border: '1px solid #E2E8F0', padding: 16, borderRadius: 8, background: '#FAFBFC', marginBottom: 12}}>
+                        <div className="flex justify-between items-center mb-2">
+                          <span style={{fontWeight: 600, fontSize: 13}}>{c.name} ({c.patient_id})</span>
+                          <span style={{background: COLORS.availBg, color: COLORS.available, fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 'bold'}}>STABILITY SCORE: {c.score}</span>
+                        </div>
+                        <div style={{fontSize: 12, color: COLORS.secondary, marginBottom: 8}}>
+                          <strong>Current Bed:</strong> {c.current_bed} · <strong>Vitals:</strong> BP {c.bp}, SpO2 {c.spo2}%<br/>
+                          <strong>Diagnosis:</strong> {c.diagnosis}
+                        </div>
+                        <div style={{fontSize: 12, background: '#EFF6FF', border: '1px solid #BFDBFE', padding: '8px 12px', borderRadius: 6, color: '#1E40AF', marginBottom: 10}}>
+                          <strong>Reasoning:</strong> {c.reasoning}<br/>
+                          <strong>Risk Assessment:</strong> {c.risk_assessment}<br/>
+                          <strong>Recommended Destination:</strong> General Ward bed {c.recommended_destination}
+                        </div>
+                        <button 
+                          onClick={() => handleApproveOverride(c.patient_id, c.current_bed, c.recommended_destination)} 
+                          disabled={approving || !vipPatientId} 
+                          style={{background: COLORS.critical, color: '#FFF', border: 'none', padding: '8px 16px', borderRadius: 6, cursor: approving ? 'default' : 'pointer', fontWeight: 600, width: '100%'}}
+                        >
+                          {approving ? 'Processing Transfer...' : `Approve & Transfer Patient to ${c.recommended_destination}`}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
           <div className="flex justify-between items-center">
             <div>
               <div style={{fontSize: 18, fontWeight: 600, color: COLORS.primary}}>Ward & ICU Beds</div>
@@ -1247,7 +1375,7 @@
                       <div style={{fontWeight: 500, fontSize: 13}}>{p.diagnosis}</div>
                     </td>
                     <td className="p-4 mono" style={{fontWeight: 500, fontSize: 15, color: COLORS.critical}}>
-                      {useWaitTimer(p.admittedAt)}
+                      {useWaitTimer(p.admission_time, p.admittedAt)}
                     </td>
                     <td className="p-4">
                       <button onClick={() => setAllocatingPatient(p)} style={{background: COLORS.sidebar, color: '#FFF', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12}}>Allocate Bed →</button>
@@ -1281,8 +1409,8 @@
       );
     };
 
-    // 5. AI AGENT NEGOTIATION TAB (BYOK INTEGRATED)
-    const AINegotiationTab = ({ config, triggerToast, patients, beds }) => {
+    // 5. CLINICAL RESOURCE OPTIMIZATION ENGINE TAB (BYOK INTEGRATED)
+    const CROEngineTab = ({ config, triggerToast, patients, beds }) => {
       const [running, setRunning] = useState(false);
       const [messages, setMessages] = useState([]);
       const [targetPatient, setTargetPatient] = useState('P-024');
@@ -1401,9 +1529,9 @@
         <div className="flex-col gap-6">
           <div className="flex justify-between items-center">
             <div>
-              <div style={{fontSize: 18, fontWeight: 600, color: COLORS.primary}}>Agent Negotiation Control Room</div>
+              <div style={{fontSize: 18, fontWeight: 600, color: COLORS.primary}}>Clinical Resource Optimization Engine (CRO Engine)</div>
               <div style={{fontSize: 13, color: COLORS.secondary}}>
-                Currently using {config.provider === 'MOCK' ? 'NEXUS Simulation sandbox' : `active ${config.provider} BYOK API`}
+                Currently using {config.provider === 'MOCK' ? 'CRO Engine Simulation sandbox' : `active ${config.provider} BYOK API`}
               </div>
             </div>
             <div className="flex gap-2">
@@ -1413,7 +1541,7 @@
                 ))}
               </select>
               <button onClick={startSimulation} disabled={running} style={{background: COLORS.primary, color: '#FFF', border: 'none', padding: '10px 18px', borderRadius: 6, cursor: 'pointer'}}>
-                {running ? 'Processing...' : 'Negotiate Resource Placement'}
+                {running ? 'Optimizing...' : 'Optimize Resource Placement'}
               </button>
             </div>
           </div>
@@ -1502,7 +1630,7 @@
               {aiEntries.map((e, i) => (
                 <div key={i} className="card-shadow" style={{background: '#FFF', border: '1px solid #E2E8F0', borderRadius: 8, padding: 12, marginTop: 10}}>
                   <div style={{fontWeight: 600, fontSize: 13}}>{e.text}</div>
-                  <div style={{fontSize: 11, color: COLORS.secondary, marginTop: 4}}>{e.agent} · Conf: {e.conf} · {e.time} ago</div>
+                  <div style={{fontSize: 11, color: COLORS.secondary, marginTop: 4}}>{e.agent} · Match Confidence: {e.conf} · {e.time} ago</div>
                 </div>
               ))}
             </div>
@@ -2249,7 +2377,25 @@
           <div className="flex-col relative card-shadow text-black" style={{background: '#FFF', borderRadius: 16, width: '90vw', maxWidth: 1000, maxHeight: '90vh', overflowY: 'auto', padding: 40, display: 'flex', flexDirection: 'column'}}>
             <div style={{position: 'absolute', top: 24, right: 24, cursor: 'pointer'}} onClick={onClose}>✕</div>
             
-            <div style={{fontWeight: 700, fontSize: 22, color: COLORS.primary}}>Patient Clinical File</div>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+              <div style={{fontWeight: 700, fontSize: 22, color: COLORS.primary}}>Patient Clinical File</div>
+              <button 
+                onClick={() => window.open(`/api/nexus/patients/${p.id}/pdf-report`, '_blank')} 
+                style={{
+                  background: COLORS.teal, 
+                  color: COLORS.sidebar, 
+                  border: 'none', 
+                  padding: '8px 16px', 
+                  borderRadius: 6, 
+                  cursor: 'pointer', 
+                  fontWeight: 600, 
+                  marginRight: 40
+                }}
+              >
+                Download PDF Report
+              </button>
+            </div>
+            
             <div className="flex items-center gap-4 mt-2">
               <span className="mono" style={{fontWeight: 500, fontSize: 16, color: COLORS.secondary}}>{p.id} — {p.diagnosis}</span>
               <span style={{background: p.status==='CRITICAL'?COLORS.critical:COLORS.warning, color: '#FFF', fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 4}}>{p.status}</span>

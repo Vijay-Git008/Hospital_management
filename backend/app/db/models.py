@@ -197,3 +197,13 @@ class NexusLastAlert(Base):
     hospital = Column(String(255), nullable=False)
     time = Column(String(50), nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    role = Column(String(50), nullable=True)  # e.g., Doctor, Nurse, Receptionist, Administrator
+    text = Column(Text, nullable=False)
+    severity = Column(String(20), default="info")  # critical, warning, info
+    is_read = Column(Integer, default=0)  # 0 for unread, 1 for read
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Patient } from '../types/negotiation';
 import { Shield, Clock, AlertTriangle } from 'lucide-react';
 
@@ -6,6 +6,30 @@ interface CaseQueueProps {
   cases: Patient[];
   onSelectCase: (c: Patient) => void;
   selectedCaseId?: string;
+}
+
+function DynamicWaitTimer({ time }: { time: string }) {
+  const [elapsed, setElapsed] = useState('');
+
+  useEffect(() => {
+    const calc = () => {
+      const diff = Date.now() - new Date(time).getTime();
+      const sec = Math.max(0, Math.floor(diff / 1000));
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h > 0) {
+        setElapsed(`${h}h ${m}m ${s}s`);
+      } else {
+        setElapsed(`${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
+      }
+    };
+    calc();
+    const interval = setInterval(calc, 1000);
+    return () => clearInterval(interval);
+  }, [time]);
+
+  return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{elapsed}</span>;
 }
 
 export function CaseQueue({ cases, onSelectCase, selectedCaseId }: CaseQueueProps) {
@@ -50,14 +74,14 @@ export function CaseQueue({ cases, onSelectCase, selectedCaseId }: CaseQueueProp
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span className="card-meta" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Clock size={12} /> {new Date(c.admission_time).toLocaleTimeString()}
+                  <Clock size={12} /> <DynamicWaitTimer time={c.admission_time} />
                 </span>
                 
                 {c.status === 'Allocated' ? (
                   <span className="badge badge-success">Allocated</span>
                 ) : (
                   <span className="badge badge-warning" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                    <AlertTriangle size={10} /> Pending CNP
+                    <AlertTriangle size={10} /> Pending CRO
                   </span>
                 )}
               </div>
