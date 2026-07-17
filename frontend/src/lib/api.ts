@@ -2,9 +2,9 @@ import axios from 'axios';
 
 let baseURL = import.meta.env.VITE_API_URL || '';
 
-// Automatically handle GitHub Codespaces port forwarding hosts
-if (typeof window !== 'undefined' && window.location.hostname.includes('.github.dev')) {
-  baseURL = `https://${window.location.hostname.replace('-3000', '-8080')}`;
+// Automatically handle GitHub Codespaces & VS Code port forwarding hosts
+if (typeof window !== 'undefined' && window.location.host.includes('-3000')) {
+  baseURL = `https://${window.location.host.replace('-3000', '-8080')}`;
 }
 
 const api = axios.create({
