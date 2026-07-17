@@ -24,6 +24,7 @@ export interface Patient {
   bedId?: string | null;
   vitals?: string;
   attendingDoctor?: string | null;
+  bloodGroup?: string;
 }
 
 export interface Incident {

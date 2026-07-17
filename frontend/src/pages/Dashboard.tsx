@@ -10,7 +10,7 @@ import { NegotiationTimeline } from '../components/NegotiationTimeline';
 import { ExplainabilityPanel } from '../components/ExplainabilityPanel';
 import { DependencyGraph } from '../components/DependencyGraph';
 import { BedManagementPanel } from '../components/BedManagementPanel';
-import { AlertCircle, RefreshCw, Send, Loader, Crown, Check } from 'lucide-react';
+import { AlertCircle, RefreshCw, Send, Loader, Crown, Check, Upload } from 'lucide-react';
 
 export function Dashboard() {
   const [cases, setCases] = useState<Patient[]>([]);
@@ -143,6 +143,23 @@ export function Dashboard() {
     }
   };
 
+  const handleImportJSON = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const parsed = JSON.parse(evt?.target?.result as string);
+        await apiService.importPatientJson(parsed);
+        alert('Patient record imported and merged successfully!');
+        setRefreshTrigger(prev => prev + 1);
+      } catch (err: any) {
+        alert('Import failed: ' + (err.response?.data?.detail || err.message));
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const selectedNegotiation = history.find(n => n.patient_id === selectedCase?.id);
 
   return (
@@ -156,13 +173,6 @@ export function Dashboard() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              WebSocket Feed: {connected ? (
-                <span className="badge badge-success">Connected</span>
-              ) : (
-                <span className="badge badge-critical">Disconnected</span>
-              )}
-            </span>
             <button className="btn" style={{ padding: '6px' }} onClick={() => setRefreshTrigger(p => p + 1)}>
               <RefreshCw size={14} />
             </button>
@@ -263,7 +273,7 @@ export function Dashboard() {
             <div className="panel-header">
               <span>CRO Engine Decision Reasoning</span>
             </div>
-            <ExplainabilityPanel negotiation={selectedNegotiation} />
+            <ExplainabilityPanel patient={selectedCase} negotiation={selectedNegotiation} />
           </div>
         </div>
       </div>
@@ -308,9 +318,18 @@ export function Dashboard() {
             value={ingestSummary}
             onChange={(e) => setIngestSummary(e.target.value)}
           />
-          <button type="submit" className="btn btn-primary" style={{ display: 'flex', gap: '6px', alignItems: 'center' }} disabled={ingesting}>
+           <button type="submit" className="btn btn-primary" style={{ display: 'flex', gap: '6px', alignItems: 'center' }} disabled={ingesting}>
             {ingesting ? <Loader size={14} className="animate-spin" /> : <Send size={14} />} Ingest
           </button>
+          <label className="btn" style={{ cursor: 'pointer', display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <Upload size={14} /> Import JSON
+            <input 
+              type="file" 
+              accept=".json" 
+              onChange={handleImportJSON} 
+              style={{ display: 'none' }} 
+            />
+          </label>
         </form>
       </div>
 

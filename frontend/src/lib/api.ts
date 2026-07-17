@@ -191,9 +191,42 @@ export const apiService = {
     const res = await api.post(`/api/nexus/notifications/${id}/read`);
     return res.data;
   },
-
   async markAllNotificationsAsRead() {
     const res = await api.post('/api/nexus/notifications/read-all');
     return res.data;
+  },
+
+  // Ambulance Fleet & Nearby Hospital Discovery
+  async getNearbyHospitals() {
+    const res = await api.get('/api/nexus/hospitals/nearby');
+    return res.data;
+  },
+
+  async getAmbulanceRecommendation(patientId: string, severity: string) {
+    const res = await api.post('/api/nexus/ambulance/recommend', {
+      patient_id: patientId,
+      severity
+    });
+    return res.data;
+  },
+
+  async dispatchAmbulance(hospitalName: string, patientId: string) {
+    const res = await api.post('/api/nexus/ambulance/dispatch', {
+      hospital_name: hospitalName,
+      patient_id: patientId
+    });
+    return res.data;
+  },
+
+  // Patient Record Interoperability & Imports/Exports
+  async exportPatientJson(patientId: string) {
+    const res = await api.get(`/api/nexus/patients/${patientId}/export-json`);
+    return res.data;
+  },
+
+  async importPatientJson(data: any) {
+    const res = await api.post('/api/nexus/patients/import-json', data);
+    return res.data;
   }
 };
+

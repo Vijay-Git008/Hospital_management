@@ -12,6 +12,17 @@ class Hospital(Base):
     name = Column(String(100), nullable=False)
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
+    address = Column(String(255), nullable=True)
+    contact_number = Column(String(50), nullable=True)
+    specialties = Column(Text, default="[]")  # JSON list
+    bed_count = Column(Integer, default=0)
+    available_beds = Column(Integer, default=0)
+    icu_beds = Column(Integer, default=0)
+    available_icu_beds = Column(Integer, default=0)
+    ambulances_total = Column(Integer, default=0)
+    ambulances_available = Column(Integer, default=0)
+    ambulances_busy = Column(Integer, default=0)
+    ambulances_maintenance = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     users = relationship("User", back_populates="hospital")

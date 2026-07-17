@@ -1,26 +1,90 @@
 import React from 'react';
-import { Negotiation } from '../types/negotiation';
-import { Bot, HelpCircle, ShieldAlert } from 'lucide-react';
+import { Negotiation, Patient } from '../types/negotiation';
+import { Bot, FileText, Download } from 'lucide-react';
+import { apiService } from '../lib/api';
 
 interface ExplainabilityPanelProps {
+  patient?: Patient | null;
   negotiation?: Negotiation;
 }
 
-export function ExplainabilityPanel({ negotiation }: ExplainabilityPanelProps) {
-  if (!negotiation) {
+export function ExplainabilityPanel({ patient, negotiation }: ExplainabilityPanelProps) {
+  if (!patient) {
     return (
       <div className="panel-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-        Select an allocated case to inspect the AI Priority Explanation.
+        Select an active patient case to view clinical details and download reports.
       </div>
     );
   }
 
-  const tree = JSON.parse(negotiation.reasoning_tree_json || '{}');
-  const aiNarrative = tree.ai_narrative || 'AI explanation unavailable – Configure a valid API key in Settings.';
-  const bundle = tree.allocated_bundle || [];
+  const handleExportJson = async () => {
+    try {
+      const data = await apiService.exportPatientJson(patient.id);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Patient_${patient.id}_Record.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert('Export failed: ' + err.message);
+    }
+  };
+
+  const tree = negotiation ? JSON.parse(negotiation.reasoning_tree_json || '{}') : null;
+  const aiNarrative = tree?.ai_narrative || 'AI explanation justification pending CRO Engine allocation.';
+  const bundle = tree?.allocated_bundle || [];
 
   return (
-    <div className="panel-content" style={{ gap: '16px' }}>
+    <div className="panel-content" style={{ gap: '14px', overflowY: 'auto', maxHeight: '100%' }}>
+      
+      {/* Patient Information & Clinical Actions */}
+      <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+          <div>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              Patient Profile
+            </span>
+            <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
+              {patient.name_encrypted}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+              Age: {patient.age} · Gender: {patient.gender} · Group: {patient.bloodGroup || 'O+'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button 
+              className="btn btn-primary" 
+              style={{ padding: '4px 8px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+              onClick={() => window.open(`/api/nexus/patients/${patient.id}/pdf-report`, '_blank')}
+            >
+              <FileText size={12} /> PDF
+            </button>
+            <button 
+              className="btn" 
+              style={{ padding: '4px 8px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+              onClick={() => window.open(`/api/nexus/patients/${patient.id}/csv-report`, '_blank')}
+            >
+              <Download size={12} /> CSV
+            </button>
+            <button 
+              className="btn" 
+              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+              onClick={handleExportJson}
+            >
+              JSON
+            </button>
+          </div>
+        </div>
+
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'var(--bg-surface-elevated)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '10px' }}>
+          <div><strong>Diagnosis:</strong> {patient.diagnosis}</div>
+          <div style={{ marginTop: '4px' }}><strong>Status:</strong> {patient.status} · <strong>Bed:</strong> {patient.bedId || 'Unallocated (EM Bay)'}</div>
+        </div>
+      </div>
+
+      {/* Scoring tree breakdown */}
       <div>
         <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>
           Negotiation Scoring Tree
@@ -43,12 +107,10 @@ export function ExplainabilityPanel({ negotiation }: ExplainabilityPanelProps) {
                   <span style={{ color: 'var(--color-success)', fontFamily: 'var(--font-mono)' }}>Score: {b.total_score}</span>
                 </div>
 
-                {/* Score bars */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
                       <span>Triage Priority ({b.scoring.triage_score})</span>
-                      <span>Weight: 45%</span>
                     </div>
                     <div style={{ height: '4px', background: 'var(--border-color)', borderRadius: '2px' }}>
                       <div style={{ height: '100%', background: 'var(--color-critical)', width: `${b.scoring.triage_score}%`, borderRadius: '2px' }}></div>
@@ -58,7 +120,6 @@ export function ExplainabilityPanel({ negotiation }: ExplainabilityPanelProps) {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
                       <span>Wait Duration ({b.scoring.wait_score})</span>
-                      <span>Weight: 20%</span>
                     </div>
                     <div style={{ height: '4px', background: 'var(--border-color)', borderRadius: '2px' }}>
                       <div style={{ height: '100%', background: 'var(--color-warning)', width: `${b.scoring.wait_score}%`, borderRadius: '2px' }}></div>
@@ -68,20 +129,9 @@ export function ExplainabilityPanel({ negotiation }: ExplainabilityPanelProps) {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
                       <span>Suitability ({b.scoring.suitability_score})</span>
-                      <span>Weight: 25%</span>
                     </div>
                     <div style={{ height: '4px', background: 'var(--border-color)', borderRadius: '2px' }}>
-                      <div style={{ height: '100%', background: 'var(--color-stable)', width: `${b.scoring.suitability_score}%`, borderRadius: '2px' }}></div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                      <span>Cascade Penalty (-{b.scoring.impact_penalty})</span>
-                      <span>Weight: 10%</span>
-                    </div>
-                    <div style={{ height: '4px', background: 'var(--border-color)', borderRadius: '2px' }}>
-                      <div style={{ height: '100%', background: 'var(--color-critical)', width: `${b.scoring.impact_penalty}%`, borderRadius: '2px' }}></div>
+                      <div style={{ height: '100%', background: 'var(--color-success)', width: `${b.scoring.suitability_score}%`, borderRadius: '2px' }}></div>
                     </div>
                   </div>
                 </div>

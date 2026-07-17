@@ -705,11 +705,28 @@
               <div style={{fontFamily: 'Inter', fontWeight: 600, fontSize: 17, color: COLORS.primary}}>
                 {allowedTabs.find(t=>t.id===tab)?.label || 'Workspace'}
               </div>
-              <div className="mono text-slate-500" style={{fontSize: 13, color: COLORS.secondary}}>{timeStr}</div>
               
               <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2" style={{fontSize: 13, color: COLORS.primary}}>
-                   NEXUS Central Hub <div style={{width: 6, height: 6, borderRadius: 3, background: COLORS.teal}}></div> Live
+                <div style={{
+                  fontFamily: 'Courier New, monospace', 
+                  fontSize: '0.8rem', 
+                  fontWeight: 700, 
+                  color: COLORS.primary, 
+                  background: '#F1F5F9', 
+                  padding: '4px 10px', 
+                  borderRadius: '6px', 
+                  border: '1px solid #CBD5E1',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
+                }}>
+                  <Icons.Clock size={12} color={COLORS.secondary} />
+                  <span>{timeStr}</span>
+                </div>
+
+                <div style={{fontSize: 13, color: COLORS.primary, fontWeight: 500}}>
+                   NEXUS Central Hub
                 </div>
                 
                 <div style={{position: 'relative'}}>
@@ -1099,11 +1116,63 @@
         setReferringPatient(null);
       };
 
+      const handleImportJSON = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const parsed = JSON.parse(evt.target.result);
+            if (!parsed.id) throw new Error('Missing Patient ID');
+            
+            let updatedList = [];
+            const exists = patients.some(p => p.id === parsed.id);
+            if (exists) {
+              updatedList = patients.map(p => p.id === parsed.id ? { ...p, ...parsed } : p);
+            } else {
+              updatedList = [...patients, parsed];
+            }
+            
+            const savedBeds = JSON.parse(localStorage.getItem('NEXUS_BEDS_DB')) || [];
+            const savedVents = JSON.parse(localStorage.getItem('NEXUS_VENT_DB')) || {};
+            triggerSave(updatedList, savedBeds, savedVents, `Imported/Merged patient record: ${parsed.name || parsed.id}`);
+            alert('Patient record imported and merged successfully!');
+          } catch(err) {
+            alert('Import failed: ' + err.message);
+          }
+        };
+        reader.readAsText(file);
+      };
+
       return (
         <div className="flex-col gap-6">
-          <div>
-            <div style={{fontSize: 18, fontWeight: 600, color: COLORS.primary}}>My Patients</div>
-            <div style={{fontSize: 13, color: COLORS.secondary}}>Dr. {doctor.name} · {doctor.specialty}</div>
+          <div className="flex justify-between items-center">
+            <div>
+              <div style={{fontSize: 18, fontWeight: 600, color: COLORS.primary}}>My Patients</div>
+              <div style={{fontSize: 13, color: COLORS.secondary}}>Dr. {doctor.name} · {doctor.specialty}</div>
+            </div>
+            <div>
+              <label 
+                style={{
+                  background: COLORS.teal, 
+                  color: COLORS.primary, 
+                  padding: '8px 16px', 
+                  borderRadius: 6, 
+                  cursor: 'pointer', 
+                  fontWeight: 600,
+                  fontSize: 13,
+                  display: 'inline-block'
+                }}
+              >
+                Import Patient JSON
+                <input 
+                  type="file" 
+                  accept=".json" 
+                  onChange={handleImportJSON} 
+                  style={{display: 'none'}} 
+                />
+              </label>
+            </div>
           </div>
 
           <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16}}>
@@ -1166,10 +1235,11 @@
     // 4. EMERGENCY CASES TAB
     const EmergencyCasesTab = ({ doctor, patients, beds, triggerSave, ventilators }) => {
       const [allocatingPatient, setAllocatingPatient] = useState(null);
-
-      const filteredCases = useMemo(() => {
-        return getDoctorEmergencyCases(doctor, patients);
-      }, [patients, doctor]);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [severityFilter, setSeverityFilter] = useState('ALL');
+      const [allocationFilter, setAllocationFilter] = useState('ALL');
+      const [sortField, setSortField] = useState('id');
+      const [sortOrder, setSortOrder] = useState('asc');
 
       const availableBedsForTriage = useMemo(() => {
         return beds.filter(b => b.status === 'AVAILABLE' && (b.zone === 'ICU' || b.zone === 'GA' || b.zone === 'GB'));
@@ -1183,9 +1253,72 @@
         const updatedBeds = beds.map(b => b.id === bedId ? { ...b, status: 'STABLE', patientId: patient.id } : b);
         const finalBeds = updatedBeds.map(b => b.id === patient.bedId ? { ...b, status: 'AVAILABLE', patientId: null } : b);
 
-        triggerSave(updatedPatients, finalBeds, ventilators, `Emergency Bed Triage: Reallocated Patient ${patient.name} (${patient.id}) from EM Bay to ${bedId}`);
+        triggerSave(updatedPatients, finalBeds, ventilators, `Emergency Bed Triage: Reallocated Patient ${patient.name || patient.id} to ${bedId}`);
         setAllocatingPatient(null);
       };
+
+      const processedCases = useMemo(() => {
+        let list = [...patients];
+
+        // Search query filter
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase();
+          list = list.filter(p => 
+            p.id.toLowerCase().includes(q) || 
+            (p.name && p.name.toLowerCase().includes(q)) || 
+            (p.diagnosis && p.diagnosis.toLowerCase().includes(q))
+          );
+        }
+
+        // Triage severity filter
+        if (severityFilter !== 'ALL') {
+          list = list.filter(p => {
+            const isCritical = p.status === 'CRITICAL' || p.triage_level === 1;
+            const isHigh = p.triage_level === 2;
+            const isModerate = p.status === 'MODERATE' || p.triage_level === 3;
+            const isStable = p.status === 'STABLE' || p.triage_level >= 4;
+            
+            if (severityFilter === 'CRITICAL') return isCritical;
+            if (severityFilter === 'HIGH') return isHigh;
+            if (severityFilter === 'MODERATE') return isModerate;
+            if (severityFilter === 'STABLE') return isStable;
+            return true;
+          });
+        }
+
+        // Allocation status filter
+        if (allocationFilter !== 'ALL') {
+          list = list.filter(p => {
+            const hasBed = !!p.bedId && p.bedId !== 'N/A' && !p.bedId.startsWith('EM');
+            if (allocationFilter === 'ALLOCATED') return hasBed;
+            if (allocationFilter === 'PENDING') return !hasBed;
+            return true;
+          });
+        }
+
+        // Sorting
+        list.sort((a, b) => {
+          let fieldA = a[sortField] || '';
+          let fieldB = b[sortField] || '';
+
+          if (sortField === 'wait_time') {
+            fieldA = new Date(a.admission_time || 0).getTime();
+            fieldB = new Date(b.admission_time || 0).getTime();
+          }
+
+          if (typeof fieldA === 'string') {
+            return sortOrder === 'asc' 
+              ? fieldA.localeCompare(fieldB) 
+              : fieldB.localeCompare(fieldA);
+          } else {
+            return sortOrder === 'asc' 
+              ? (fieldA > fieldB ? 1 : -1) 
+              : (fieldB > fieldA ? 1 : -1);
+          }
+        });
+
+        return list;
+      }, [patients, searchQuery, severityFilter, allocationFilter, sortField, sortOrder]);
 
       return (
         <div className="flex-col gap-6">
@@ -1196,34 +1329,158 @@
             </div>
           </div>
 
-          <div style={{background: '#FFF', border: '1px solid #E2E8F0', borderRadius: 12, overflow: 'hidden', margin: '16px 0'}}>
-            <table style={{width: '100%', borderCollapse: 'collapse', textAlign: 'left'}}>
+          {/* Search, Filter, and Sorting Controls */}
+          <div className="card-shadow" style={{background: '#FFF', borderRadius: 8, padding: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', border: '1px solid #E2E8F0', marginTop: 12}}>
+            <div style={{position: 'relative', flex: 1, minWidth: 200}}>
+              <input 
+                type="text" 
+                placeholder="Search patient ID, name, or diagnosis..." 
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{width: '100%', height: 38, paddingLeft: 12, paddingRight: 12, border: '1px solid #CBD5E1', borderRadius: 6, fontSize: 13}}
+              />
+            </div>
+            
+            <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+              <span style={{fontSize: 12, fontWeight: 600, color: COLORS.secondary}}>Severity:</span>
+              <select 
+                value={severityFilter} 
+                onChange={e => setSeverityFilter(e.target.value)}
+                style={{height: 38, border: '1px solid #CBD5E1', borderRadius: 6, fontSize: 13, padding: '0 8px', background: '#FFF'}}
+              >
+                <option value="ALL">All Severities</option>
+                <option value="CRITICAL">🔴 Critical</option>
+                <option value="HIGH">🟠 High</option>
+                <option value="MODERATE">🟡 Moderate</option>
+                <option value="STABLE">🟢 Stable</option>
+              </select>
+            </div>
+
+            <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+              <span style={{fontSize: 12, fontWeight: 600, color: COLORS.secondary}}>Allocation:</span>
+              <select 
+                value={allocationFilter} 
+                onChange={e => setAllocationFilter(e.target.value)}
+                style={{height: 38, border: '1px solid #CBD5E1', borderRadius: 6, fontSize: 13, padding: '0 8px', background: '#FFF'}}
+              >
+                <option value="ALL">All Allocations</option>
+                <option value="ALLOCATED">Allocated</option>
+                <option value="PENDING">Pending Bed</option>
+              </select>
+            </div>
+
+            <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+              <span style={{fontSize: 12, fontWeight: 600, color: COLORS.secondary}}>Sort:</span>
+              <select 
+                value={sortField} 
+                onChange={e => setSortField(e.target.value)}
+                style={{height: 38, border: '1px solid #CBD5E1', borderRadius: 6, fontSize: 13, padding: '0 8px', background: '#FFF'}}
+              >
+                <option value="id">Patient ID</option>
+                <option value="name">Name</option>
+                <option value="wait_time">Wait Time</option>
+                <option value="status">Status</option>
+              </select>
+              <button 
+                onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                style={{height: 38, width: 38, border: '1px solid #CBD5E1', borderRadius: 6, background: '#FFF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'}}
+              >
+                {sortOrder === 'asc' ? '↑' : '↓'}
+              </button>
+            </div>
+          </div>
+
+          <div style={{background: '#FFF', border: '1px solid #E2E8F0', borderRadius: 12, overflowX: 'auto', margin: '16px 0'}}>
+            <table style={{width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: 1000}}>
               <thead style={{background: '#F8FAFC', fontSize: 11, color: COLORS.secondary, letterSpacing: '0.05em'}}>
-                <tr>
-                  <th className="p-4">PATIENT</th>
-                  <th className="p-4">DIAGNOSIS</th>
-                  <th className="p-4">WAIT TIME</th>
+                <tr style={{borderBottom: '2px solid #E2E8F0'}}>
+                  <th className="p-4">PATIENT INFO</th>
+                  <th className="p-4">SEVERITY</th>
+                  <th className="p-4">ARRIVAL / WAIT TIME</th>
+                  <th className="p-4">ASSIGNED BED & WARD</th>
+                  <th className="p-4">STAFF ASSIGNED</th>
+                  <th className="p-4">CLINICAL DATA / AI DETAIL</th>
+                  <th className="p-4">STATUS</th>
                   <th className="p-4">ACTION</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredCases.map(p => (
-                  <tr key={p.id} style={{borderTop: '1px solid #E2E8F0'}}>
-                    <td className="p-4">
-                      <div className="mono" style={{fontWeight: 500, fontSize: 14, color: COLORS.primary}}>{p.id}</div>
-                      <div style={{fontSize: 11, color: COLORS.muted}}>{p.name}</div>
-                    </td>
-                    <td className="p-4">
-                      <div style={{fontWeight: 500, fontSize: 13}}>{p.diagnosis}</div>
-                    </td>
-                    <td className="p-4 mono" style={{fontWeight: 500, fontSize: 15, color: COLORS.critical}}>
-                      {useWaitTimer(p.admittedAt)}
-                    </td>
-                    <td className="p-4">
-                      <button onClick={() => setAllocatingPatient(p)} style={{background: COLORS.sidebar, color: '#FFF', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12}}>Allocate Bed →</button>
-                    </td>
+                {processedCases.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" style={{padding: '32px 0', color: COLORS.secondary, textAlign: 'center', fontSize: 13}}>No matching emergency cases found.</td>
                   </tr>
-                ))}
+                ) : (
+                  processedCases.map(p => {
+                    const isCritical = p.status === 'CRITICAL' || p.triage_level === 1;
+                    const isHigh = p.triage_level === 2;
+                    const isModerate = p.status === 'MODERATE' || p.triage_level === 3;
+                    const isStable = p.status === 'STABLE' || p.triage_level >= 4;
+                    const hasBed = !!p.bedId && p.bedId !== 'N/A' && !p.bedId.startsWith('EM');
+
+                    let aiReasoning = '';
+                    let isIcuReq = false;
+                    try {
+                      const clin = JSON.parse(p.clinical_data_json || '{}');
+                      aiReasoning = clin.reasoning || clin.summary || '';
+                      isIcuReq = clin.icu_required || isCritical;
+                    } catch(e) {}
+
+                    return (
+                      <tr key={p.id} style={{borderTop: '1px solid #E2E8F0'}}>
+                        <td className="p-4">
+                          <div className="mono" style={{fontWeight: 700, fontSize: 14, color: COLORS.primary}}>{p.id}</div>
+                          <div style={{fontSize: 12, fontWeight: 600, color: COLORS.primary}}>{p.name || 'Anonymous'}</div>
+                          <div style={{fontSize: 11, color: COLORS.muted}}>{p.age || 'N/A'} yrs · {p.gender || 'N/A'}</div>
+                        </td>
+                        <td className="p-4">
+                          {isCritical && <span style={{background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 4, display: 'inline-block'}}>🔴 Critical</span>}
+                          {isHigh && <span style={{background: 'rgba(245, 158, 11, 0.1)', color: '#F59E0B', fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 4, display: 'inline-block'}}>🟠 High</span>}
+                          {isModerate && <span style={{background: 'rgba(59, 130, 246, 0.1)', color: '#3B82F6', fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 4, display: 'inline-block'}}>🟡 Moderate</span>}
+                          {isStable && <span style={{background: 'rgba(16, 185, 129, 0.1)', color: '#10B981', fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 4, display: 'inline-block'}}>🟢 Stable</span>}
+                        </td>
+                        <td className="p-4">
+                          <div style={{fontSize: 11, color: COLORS.secondary}}>{p.admission_time ? new Date(p.admission_time).toLocaleTimeString() : 'N/A'}</div>
+                          <div className="mono" style={{fontSize: 13, fontWeight: 700, color: isCritical ? COLORS.critical : COLORS.secondary, marginTop: 4}}>
+                            {useWaitTimer(p.admission_time, p.admittedAt)}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div style={{fontSize: 12, fontWeight: 600}}>
+                            Bed: <span className="mono" style={{background: '#F1F5F9', padding: '2px 6px', borderRadius: 4}}>{p.bedId || 'EM Bay'}</span>
+                          </div>
+                          <div style={{fontSize: 11, color: COLORS.secondary, marginTop: 4}}>
+                            Zone: {p.bedId ? (p.bedId.startsWith('ICU') ? 'Intensive Care' : 'General Ward') : 'Emergency Medicine'}
+                          </div>
+                          <div style={{fontSize: 11, color: isIcuReq ? COLORS.critical : COLORS.secondary, fontWeight: isIcuReq ? 700 : 500, marginTop: 4}}>
+                            ICU Requirement: {isIcuReq ? 'Yes' : 'No'}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div style={{fontSize: 12, color: COLORS.primary}}><strong>Doc:</strong> {p.attendingDoctor || 'Assigning...'}</div>
+                          <div style={{fontSize: 12, color: COLORS.primary, marginTop: 2}}><strong>Nurse:</strong> {p.attendingNurse || 'Staffing Pool'}</div>
+                        </td>
+                        <td className="p-4">
+                          <div style={{fontSize: 12, fontWeight: 600}}>{p.diagnosis}</div>
+                          {aiReasoning && (
+                            <div style={{fontSize: 10.5, color: COLORS.muted, background: '#FFFBEB', padding: '6px 8px', borderRadius: 4, marginTop: 6, border: '1px solid #FEF3C7', lineHeight: '1.35'}}>
+                              <strong>AI Reasoning:</strong> {aiReasoning}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          {hasBed ? (
+                            <span style={{background: 'rgba(16, 185, 129, 0.1)', color: '#10B981', fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 4}}>Allocated</span>
+                          ) : (
+                            <span style={{background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 4}}>Pending</span>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          <button onClick={() => setAllocatingPatient(p)} style={{background: COLORS.sidebar, color: '#FFF', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12}}>Allocate Bed →</button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -1479,65 +1736,496 @@
 
     // 7. AMBULANCE DISPATCH TAB
     const AmbulanceDispatchTab = ({ patients, beds, triggerSave, lastAlert, setLastAlert, ventilators }) => {
-      const [ambulanceModal, setAmbulanceModal] = useState(false);
-      const totalOccupiedCount = beds.filter(b=>b.status!=='AVAILABLE').length;
-      const occupancyPercent = Math.round((totalOccupiedCount / beds.length) * 100);
+      const [selectedPatientId, setSelectedPatientId] = useState('');
+      const [recommendation, setRecommendation] = useState(null);
+      const [loadingRecommendation, setLoadingRecommendation] = useState(false);
+      const [dispatching, setDispatching] = useState(false);
+      const [dispatchSuccess, setDispatchSuccess] = useState('');
+      
+      const [hospitals, setHospitals] = useState([
+        {
+          id: 'h1',
+          name: "Apollo Hospitals Greams Road",
+          address: "Greams Road, Thousand Lights, Chennai, Tamil Nadu",
+          distance: 3.2,
+          travel_time: 5,
+          contact_number: "+91 44 2829 0200",
+          specialties: ["Cardiothoracic Surgery", "Intensive Care Unit", "Emergency Medicine"],
+          bed_count: 350,
+          available_beds: 75,
+          icu_beds: 50,
+          available_icu_beds: 12,
+          ambulances_total: 12,
+          ambulances_available: 6,
+          ambulances_busy: 4,
+          ambulances_maintenance: 2,
+          capacity_percent: 78.6
+        },
+        {
+          id: 'h2',
+          name: "Kauvery Hospital",
+          address: "Alwarpet, Chennai, Tamil Nadu",
+          distance: 5.8,
+          travel_time: 10,
+          contact_number: "+91 44 4000 6000",
+          specialties: ["Emergency Medicine", "Pulmonology", "Internal Medicine"],
+          bed_count: 200,
+          available_beds: 35,
+          icu_beds: 30,
+          available_icu_beds: 5,
+          ambulances_total: 8,
+          ambulances_available: 3,
+          ambulances_busy: 4,
+          ambulances_maintenance: 1,
+          capacity_percent: 82.5
+        },
+        {
+          id: 'h3',
+          name: "MIOT International",
+          address: "Manapakkam, Chennai, Tamil Nadu",
+          distance: 11.2,
+          travel_time: 20,
+          contact_number: "+91 44 4200 2288",
+          specialties: ["Orthopedics", "General Surgery", "Emergency Medicine"],
+          bed_count: 500,
+          available_beds: 110,
+          icu_beds: 80,
+          available_icu_beds: 15,
+          ambulances_total: 15,
+          ambulances_available: 8,
+          ambulances_busy: 5,
+          ambulances_maintenance: 2,
+          capacity_percent: 78
+        },
+        {
+          id: 'h4',
+          name: "MGM Healthcare",
+          address: "Aminjikarai, Chennai, Tamil Nadu",
+          distance: 4.7,
+          travel_time: 8,
+          contact_number: "+91 44 4524 2424",
+          specialties: ["Cardiothoracic Surgery", "Intensive Care Unit", "Neurosurgery"],
+          bed_count: 400,
+          available_beds: 90,
+          icu_beds: 60,
+          available_icu_beds: 8,
+          ambulances_total: 10,
+          ambulances_available: 4,
+          ambulances_busy: 5,
+          ambulances_maintenance: 1,
+          capacity_percent: 77.5
+        },
+        {
+          id: 'h5',
+          name: "Fortis Malar Hospital",
+          address: "Adyar, Chennai, Tamil Nadu",
+          distance: 8.6,
+          travel_time: 15,
+          contact_number: "+91 44 4242 4242",
+          specialties: ["Cardiothoracic Surgery", "Emergency Medicine", "General Surgery"],
+          bed_count: 180,
+          available_beds: 28,
+          icu_beds: 25,
+          available_icu_beds: 3,
+          ambulances_total: 6,
+          ambulances_available: 2,
+          ambulances_busy: 3,
+          ambulances_maintenance: 1,
+          capacity_percent: 84.4
+        },
+        {
+          id: 'h6',
+          name: "Sri Ramachandra Medical Centre",
+          address: "Porur, Chennai, Tamil Nadu",
+          distance: 14.8,
+          travel_time: 26,
+          contact_number: "+91 44 2476 8027",
+          specialties: ["Neurosurgery", "Intensive Care Unit", "Pulmonology"],
+          bed_count: 800,
+          available_beds: 190,
+          icu_beds: 120,
+          available_icu_beds: 24,
+          ambulances_total: 20,
+          ambulances_available: 10,
+          ambulances_busy: 8,
+          ambulances_maintenance: 2,
+          capacity_percent: 76.2
+        },
+        {
+          id: 'h7',
+          name: "SIMS Hospital",
+          address: "Vadapalani, Chennai, Tamil Nadu",
+          distance: 7.6,
+          travel_time: 13,
+          contact_number: "+91 44 4396 9999",
+          specialties: ["Orthopedics", "Cardiothoracic Surgery", "Neurosurgery"],
+          bed_count: 345,
+          available_beds: 64,
+          icu_beds: 45,
+          available_icu_beds: 9,
+          ambulances_total: 10,
+          ambulances_available: 5,
+          ambulances_busy: 4,
+          ambulances_maintenance: 1,
+          capacity_percent: 81.4
+        },
+        {
+          id: 'h8',
+          name: "Government General Hospital",
+          address: "Park Town, Chennai, Tamil Nadu",
+          distance: 0.2,
+          travel_time: 1,
+          contact_number: "+91 44 2530 5000",
+          specialties: ["Emergency Medicine", "General Surgery", "Internal Medicine"],
+          bed_count: 1500,
+          available_beds: 350,
+          icu_beds: 150,
+          available_icu_beds: 18,
+          ambulances_total: 25,
+          ambulances_available: 12,
+          ambulances_busy: 10,
+          ambulances_maintenance: 3,
+          capacity_percent: 76.6
+        },
+        {
+          id: 'h9',
+          name: "Gleneagles HealthCity",
+          address: "Perumbakkam, Chennai, Tamil Nadu",
+          distance: 23.4,
+          travel_time: 42,
+          contact_number: "+91 44 6677 8888",
+          specialties: ["Intensive Care Unit", "Pulmonology", "General Surgery"],
+          bed_count: 250,
+          available_beds: 52,
+          icu_beds: 35,
+          available_icu_beds: 6,
+          ambulances_total: 8,
+          ambulances_available: 3,
+          ambulances_busy: 4,
+          ambulances_maintenance: 1,
+          capacity_percent: 79.2
+        },
+        {
+          id: 'h10',
+          name: "Vijaya Hospital",
+          address: "Vadapalani, Chennai, Tamil Nadu",
+          distance: 7.4,
+          travel_time: 13,
+          contact_number: "+91 44 6677 8899",
+          specialties: ["Internal Medicine", "Orthopedics", "Emergency Medicine"],
+          bed_count: 300,
+          available_beds: 48,
+          icu_beds: 40,
+          available_icu_beds: 7,
+          ambulances_total: 9,
+          ambulances_available: 4,
+          ambulances_busy: 4,
+          ambulances_maintenance: 1,
+          capacity_percent: 84
+        }
+      ]);
 
-      const handleSendAlert = (hospitalName) => {
-        const timeStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const alertObj = { hospital: hospitalName, time: timeStamp };
-        localStorage.setItem('NEXUS_LAST_ALERT_DB', JSON.stringify(alertObj));
-        setLastAlert(alertObj);
+      const unallocatedPatients = useMemo(() => {
+        return patients.filter(p => !p.bedId || p.bedId === 'N/A' || p.bedId.startsWith('EM'));
+      }, [patients]);
 
-        triggerSave(patients, beds, ventilators, `Ambulance Alert Sent: Rerouted dispatch direction path to: ${hospitalName}`);
-        setAmbulanceModal(false);
+      const handleGetRecommendation = () => {
+        if (!selectedPatientId) return;
+        setLoadingRecommendation(true);
+        setRecommendation(null);
+        setDispatchSuccess('');
+        
+        setTimeout(() => {
+          const patient = patients.find(p => p.id === selectedPatientId);
+          const isCritical = patient.status === 'CRITICAL';
+          
+          const scored = hospitals.map(h => {
+            let score = 100;
+            const reasons = [];
+            
+            if (isCritical) {
+              if (h.available_icu_beds > 0) {
+                score += 30;
+                reasons.push(`ICU Bed Available (${h.available_icu_beds} open)`);
+              } else {
+                score -= 50;
+                reasons.push("No ICU Bed Available");
+              }
+            } else {
+              if (h.available_beds > 0) {
+                score += 20;
+                reasons.push(`General Bed Available (${h.available_beds} open)`);
+              } else {
+                score -= 30;
+                reasons.push("High occupancy");
+              }
+            }
+            
+            if (h.ambulances_available > 0) {
+              score += 15;
+              reasons.push(`${h.ambulances_available} Ambulances Available`);
+            } else {
+              score -= 20;
+              reasons.push("No active ambulance units");
+            }
+            
+            score -= h.distance * 2;
+            reasons.push(`${h.distance} km Away`);
+            
+            const diag = (patient.diagnosis || "").toLowerCase();
+            let matchedSpec = null;
+            if (diag.includes("cardiac") || diag.includes("heart") || diag.includes("tension")) {
+              if (h.specialties.includes("Cardiothoracic Surgery")) matchedSpec = "Cardiothoracic Surgery";
+            } else if (diag.includes("tbi") || diag.includes("neuro") || diag.includes("head")) {
+              if (h.specialties.includes("Neurosurgery")) matchedSpec = "Neurosurgery";
+            } else if (diag.includes("fracture") || diag.includes("femur")) {
+              if (h.specialties.includes("Orthopedics")) matchedSpec = "Orthopedics";
+            }
+            
+            if (matchedSpec) {
+              score += 40;
+              reasons.push(`${matchedSpec} Department Available`);
+            }
+            
+            return { h, score, reasons };
+          });
+          
+          scored.sort((a,b) => b.score - a.score);
+          const best = scored[0];
+          
+          setRecommendation({
+            recommended_hospital: best.h.name,
+            distance: best.h.distance,
+            travel_time: best.h.travel_time,
+            reasons: best.reasons.slice(0, 5),
+            confidence: best.score > 80 ? 'High' : 'Medium'
+          });
+          setLoadingRecommendation(false);
+        }, 850);
+      };
+
+      const handleDispatch = (hospitalName) => {
+        setDispatching(true);
+        setTimeout(() => {
+          setHospitals(prev => prev.map(h => {
+            if (h.name === hospitalName && h.ambulances_available > 0) {
+              return {
+                ...h,
+                ambulances_available: h.ambulances_available - 1,
+                ambulances_busy: h.ambulances_busy + 1
+              };
+            }
+            return h;
+          }));
+          
+          const patient = patients.find(p => p.id === selectedPatientId);
+          const pName = patient ? patient.name : selectedPatientId;
+          
+          setDispatchSuccess(`Ambulance unit successfully dispatched to ${hospitalName} for patient ${pName}.`);
+          triggerSave(patients, beds, ventilators, `Ambulance unit dispatched to ${hospitalName} for patient ${pName} (${selectedPatientId})`);
+          setRecommendation(null);
+          setSelectedPatientId('');
+          setDispatching(false);
+        }, 800);
       };
 
       return (
         <div className="flex-col gap-6">
           <div>
-            <div style={{fontSize: 18, fontWeight: 600, color: COLORS.primary}}>Ambulance Dispatch Control</div>
-            <div style={{fontSize: 13, color: COLORS.secondary}}>Hospital Capacity Diagnostics Screen</div>
+            <div style={{fontSize: 18, fontWeight: 600, color: COLORS.primary}}>Intelligent Ambulance Dispatch & Network Command</div>
+            <div style={{fontSize: 13, color: COLORS.secondary}}>Real-time routing, capacity mapping, and AI-recommended triage destinations</div>
           </div>
 
-          <div className="card-shadow" style={{background: '#FFF', border: '1px solid #E2E8F0', borderRadius: 12, padding: 24}}>
-            <div style={{fontSize: 14, fontWeight: 600, marginBottom: 8}}>Live NEXUS Bed Occupancy</div>
-            <div className="mono" style={{fontSize: 24, fontWeight: 'bold'}}>{occupancyPercent}% Occupied</div>
+          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20}}>
             
-            <div style={{width: '100%', height: 16, background: '#F1F5F9', borderRadius: 8, overflow: 'hidden', margin: '16px 0'}}>
-              <div style={{width: `${occupancyPercent}%`, height: '100%', background: occupancyPercent >= 80 ? COLORS.critical : COLORS.available, transition: 'width 1s ease-out'}}></div>
-            </div>
-
-            <button onClick={() => setAmbulanceModal(true)} style={{background: COLORS.sidebar, color: '#FFF', border: 'none', padding: '12px 24px', borderRadius: 6, cursor: 'pointer', fontWeight: 600}}>
-              Open Dispatch Control Window
-            </button>
-          </div>
-
-          {ambulanceModal && (
-            <div className="flex items-center justify-center w-full h-full" style={{position: 'fixed', top: 0, left: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center'}}>
-              <div className="flex-col card-shadow" style={{background: '#FFF', borderRadius: 16, width: '90vw', maxWidth: 500, padding: 32, display: 'flex', flexDirection: 'column'}}>
-                <div className="flex justify-between items-center mb-4">
-                  <span style={{fontWeight: 700, fontSize: 18}}>Ambulance Dispatch Alert Window</span>
-                  <span onClick={() => setAmbulanceModal(false)} style={{cursor: 'pointer', fontSize: 18, color: COLORS.secondary}}>✕</span>
+            {/* AI Recommendation Panel */}
+            <div className="card-shadow flex-col" style={{background: '#FFF', borderRadius: 12, padding: 24, border: '1px solid #E2E8F0'}}>
+              <span style={{fontWeight: 'bold', fontSize: 14, color: COLORS.primary, display: 'block', marginBottom: 12}}>Intelligent Destination Recommendation</span>
+              
+              <div className="flex-col gap-4">
+                <div className="flex-col gap-1">
+                  <label style={{fontSize: 11, fontWeight: 'bold', color: COLORS.secondary}}>SELECT ACTIVE INBOUND CASE</label>
+                  <select 
+                    value={selectedPatientId} 
+                    onChange={e => {
+                      setSelectedPatientId(e.target.value);
+                      setRecommendation(null);
+                      setDispatchSuccess('');
+                    }}
+                    style={{height: 38, border: '1px solid #CBD5E1', borderRadius: 6, padding: '0 12px', fontSize: 13, background: '#FFF'}}
+                  >
+                    <option value="">-- Choose Patient Case --</option>
+                    {unallocatedPatients.map(p => (
+                      <option key={p.id} value={p.id}>
+                        [{p.id}] {p.name || 'Anonymous'} · {p.diagnosis} (Severity: {p.status})
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
-                <div className="flex-col gap-3">
-                  {[
-                    { name: 'NEXUS Metro South Branch', dist: '8.2 km', icu: 3, em: 2, specialty: 'Trauma, Cardiology' },
-                    { name: 'NEXUS West Wing Annex', dist: '12.4 km', icu: 2, em: 4, specialty: 'Stroke, Pulmonology' }
-                  ].map((h, i) => (
-                    <div key={i} style={{border: '1px solid #E2E8F0', padding: 14, borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                <button 
+                  onClick={handleGetRecommendation} 
+                  disabled={!selectedPatientId || loadingRecommendation}
+                  style={{
+                    background: selectedPatientId ? COLORS.primary : '#E2E8F0', 
+                    color: selectedPatientId ? '#FFF' : COLORS.muted, 
+                    border: 'none', 
+                    height: 38, 
+                    borderRadius: 6, 
+                    cursor: selectedPatientId ? 'pointer' : 'not-allowed', 
+                    fontWeight: 600,
+                    fontSize: 13
+                  }}
+                >
+                  {loadingRecommendation ? 'Processing AI Recommendation...' : 'Compute Optimal Dispatch Destination'}
+                </button>
+
+                {dispatchSuccess && (
+                  <div style={{background: 'rgba(16, 185, 129, 0.1)', color: '#10B981', border: '1px solid rgba(16, 185, 129, 0.2)', padding: 12, borderRadius: 6, fontSize: 13, fontWeight: 600}}>
+                    {dispatchSuccess}
+                  </div>
+                )}
+
+                {recommendation && (
+                  <div className="flex-col gap-3" style={{background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: 16, marginTop: 12}}>
+                    <div className="flex justify-between items-center" style={{borderBottom: '1px solid #E2E8F0', paddingBottom: 8}}>
                       <div className="flex-col">
-                        <span style={{fontWeight: 600, fontSize: 13}}>{h.name} ({h.dist})</span>
-                        <span style={{fontSize: 11, color: COLORS.secondary}}>Available Beds: ICU {h.icu}, EM {h.em}</span>
+                        <span style={{fontSize: 11, color: COLORS.secondary, fontWeight: 'bold'}}>AI RECOMMENDATION</span>
+                        <span style={{fontSize: 15, fontWeight: 700, color: COLORS.primary}}>{recommendation.recommended_hospital}</span>
                       </div>
-                      <button onClick={() => handleSendAlert(h.name)} style={{background: COLORS.teal, border: 'none', color: COLORS.primary, padding: '8px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 'bold'}}>Send Alert</button>
+                      <span style={{
+                        background: recommendation.confidence === 'High' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)', 
+                        color: recommendation.confidence === 'High' ? '#10B981' : '#F59E0B', 
+                        fontSize: 11, 
+                        fontWeight: 700, 
+                        padding: '4px 8px', 
+                        borderRadius: 4
+                      }}>
+                        Confidence: {recommendation.confidence}
+                      </span>
                     </div>
-                  ))}
-                </div>
+
+                    <div style={{fontSize: 12, color: COLORS.secondary}}>
+                      <strong>Distance:</strong> {recommendation.distance} km away · <strong>Est. Arrival:</strong> {recommendation.travel_time} mins
+                    </div>
+
+                    <div className="flex-col gap-1">
+                      <span style={{fontSize: 11, fontWeight: 'bold', color: COLORS.primary}}>DECISION FACTORS:</span>
+                      {recommendation.reasons.map((reason, idx) => (
+                        <div key={idx} style={{fontSize: 12, color: COLORS.secondary, display: 'flex', alignItems: 'center', gap: 6}}>
+                          <span>•</span>
+                          <span>{reason}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button 
+                      onClick={() => handleDispatch(recommendation.recommended_hospital)}
+                      disabled={dispatching}
+                      style={{
+                        background: '#10B981', 
+                        color: '#FFF', 
+                        border: 'none', 
+                        height: 38, 
+                        borderRadius: 6, 
+                        cursor: 'pointer', 
+                        fontWeight: 600, 
+                        marginTop: 8,
+                        fontSize: 13
+                      }}
+                    >
+                      {dispatching ? 'Dispatching...' : 'Approve & Dispatch Ambulance'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
-          )}
+
+            {/* Primary Command Fleet Status */}
+            <div className="card-shadow flex-col" style={{background: '#FFF', borderRadius: 12, padding: 24, border: '1px solid #E2E8F0'}}>
+              <span style={{fontWeight: 'bold', fontSize: 14, color: COLORS.primary, display: 'block', marginBottom: 12}}>NEXUS Central Hub Fleet Status (Metro General)</span>
+              
+              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12}}>
+                <div style={{background: '#F8FAFC', border: '1px solid #E2E8F0', padding: 12, borderRadius: 8}}>
+                  <div style={{fontSize: 11, color: COLORS.secondary, fontWeight: 'bold'}}>TOTAL FLEET</div>
+                  <div style={{fontSize: 22, fontWeight: 700, color: COLORS.primary}}>8 Units</div>
+                </div>
+                <div style={{background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8}}>
+                  <div style={{fontSize: 11, color: '#10B981', fontWeight: 'bold'}}>AVAILABLE</div>
+                  <div style={{fontSize: 22, fontWeight: 700, color: '#10B981'}}>4 Units</div>
+                </div>
+                <div style={{background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.1)', padding: 12, borderRadius: 8}}>
+                  <div style={{fontSize: 11, color: '#EF4444', fontWeight: 'bold'}}>BUSY</div>
+                  <div style={{fontSize: 22, fontWeight: 700, color: '#EF4444'}}>3 Units</div>
+                </div>
+                <div style={{background: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.1)', padding: 12, borderRadius: 8}}>
+                  <div style={{fontSize: 11, color: '#F59E0B', fontWeight: 'bold'}}>MAINTENANCE</div>
+                  <div style={{fontSize: 22, fontWeight: 700, color: '#F59E0B'}}>1 Unit</div>
+                </div>
+              </div>
+              <div style={{fontSize: 11, color: COLORS.secondary, marginTop: 16}}>
+                * Busy units estimate return to central dispatch pool in ~12 mins.
+              </div>
+            </div>
+
+          </div>
+
+          {/* Nearby Hospital Network Status */}
+          <div className="card-shadow" style={{background: '#FFF', border: '1px solid #E2E8F0', borderRadius: 12, padding: 24}}>
+            <span style={{fontWeight: 'bold', fontSize: 14, color: COLORS.primary, display: 'block', marginBottom: 12}}>Regional Hospital Network Directory (Chennai Central)</span>
+            
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16}}>
+              {hospitals.map(h => {
+                const totalBeds = h.bed_count;
+                const openBeds = h.available_beds;
+                const totalIcu = h.icu_beds;
+                const openIcu = h.available_icu_beds;
+                const totalAmbs = h.ambulances_total;
+                const openAmbs = h.ambulances_available;
+                const busyAmbs = h.ambulances_busy;
+                const maintAmbs = h.ambulances_maintenance;
+
+                return (
+                  <div key={h.id} style={{border: '1px solid #E2E8F0', borderRadius: 8, padding: 16, background: '#FFF'}}>
+                    <div className="flex justify-between items-start" style={{borderBottom: '1px solid #F1F5F9', paddingBottom: 10, marginBottom: 10}}>
+                      <div className="flex-col">
+                        <span style={{fontWeight: 700, fontSize: 14, color: COLORS.primary}}>{h.name}</span>
+                        <span style={{fontSize: 11, color: COLORS.secondary}}>{h.address}</span>
+                      </div>
+                      <div className="flex-col text-right">
+                        <span className="mono" style={{fontWeight: 700, fontSize: 12, color: COLORS.teal}}>{h.distance} km</span>
+                        <span style={{fontSize: 10, color: COLORS.secondary}}>{h.travel_time} mins travel</span>
+                      </div>
+                    </div>
+
+                    <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 12}}>
+                      <div className="flex-col">
+                        <div style={{fontWeight: 'bold', color: COLORS.secondary, marginBottom: 4}}>CAPACITY</div>
+                        <div>Beds: <span style={{fontWeight: 700}}>{openBeds} / {totalBeds}</span></div>
+                        <div style={{marginTop: 2}}>ICU: <span style={{fontWeight: 700, color: openIcu > 0 ? '#10B981' : '#EF4444'}}>{openIcu} / {totalIcu}</span></div>
+                      </div>
+
+                      <div className="flex-col">
+                        <div style={{fontWeight: 'bold', color: COLORS.secondary, marginBottom: 4}}>AMBULANCES</div>
+                        <div>Available: <span style={{fontWeight: 700, color: '#10B981'}}>{openAmbs}</span></div>
+                        <div style={{marginTop: 2}}>Busy: <span style={{fontWeight: 700}}>{busyAmbs}</span> | Maint: <span>{maintAmbs}</span></div>
+                      </div>
+                    </div>
+
+                    <div style={{marginTop: 10, borderTop: '1px solid #F1F5F9', paddingTop: 8}}>
+                      <div style={{fontSize: 11, color: COLORS.secondary}}>
+                        <strong>Specialties:</strong> {h.specialties.join(', ')}
+                      </div>
+                      <div style={{fontSize: 11, color: COLORS.muted, marginTop: 4, display: 'flex', justifyContent: 'space-between'}}>
+                        <span>Contact: {h.contact_number}</span>
+                        <span>Capacity: {h.capacity_percent}% occupied</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       );
     };
@@ -2218,8 +2906,61 @@
         <div className="flex items-center justify-center w-full h-full" style={{position: 'fixed', top: 0, left: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center'}}>
           <div className="flex-col relative card-shadow text-black" style={{background: '#FFF', borderRadius: 16, width: '90vw', maxWidth: 1000, maxHeight: '90vh', overflowY: 'auto', padding: 40, display: 'flex', flexDirection: 'column'}}>
             <div style={{position: 'absolute', top: 24, right: 24, cursor: 'pointer'}} onClick={onClose}>✕</div>
-            
-            <div style={{fontWeight: 700, fontSize: 22, color: COLORS.primary}}>Patient Clinical File</div>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+              <div style={{fontWeight: 700, fontSize: 22, color: COLORS.primary}}>Patient Clinical File</div>
+              <div style={{display: 'flex', gap: 10, marginRight: 40}}>
+                <button 
+                  onClick={() => window.open(`/api/nexus/patients/${p.id}/pdf-report`, '_blank')} 
+                  style={{
+                    background: COLORS.teal, 
+                    color: COLORS.primary, 
+                    border: 'none', 
+                    padding: '8px 16px', 
+                    borderRadius: 6, 
+                    cursor: 'pointer', 
+                    fontWeight: 600
+                  }}
+                >
+                  Download PDF
+                </button>
+                <button 
+                  onClick={() => window.open(`/api/nexus/patients/${p.id}/csv-report`, '_blank')} 
+                  style={{
+                    background: COLORS.sidebar, 
+                    color: '#FFF', 
+                    border: 'none', 
+                    padding: '8px 16px', 
+                    borderRadius: 6, 
+                    cursor: 'pointer', 
+                    fontWeight: 600
+                  }}
+                >
+                  Download CSV
+                </button>
+                <button 
+                  onClick={() => {
+                    const blob = new Blob([JSON.stringify(p, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `Patient_${p.id}_Record.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }} 
+                  style={{
+                    background: '#FFF', 
+                    color: COLORS.primary, 
+                    border: '1px solid #CBD5E1', 
+                    padding: '8px 16px', 
+                    borderRadius: 6, 
+                    cursor: 'pointer', 
+                    fontWeight: 600
+                  }}
+                >
+                  Export JSON
+                </button>
+              </div>
+            </div>
             <div className="flex items-center gap-4 mt-2">
               <span className="mono" style={{fontWeight: 500, fontSize: 16, color: COLORS.secondary}}>{p.id} — {p.diagnosis}</span>
               <span style={{background: p.status==='CRITICAL'?COLORS.critical:COLORS.warning, color: '#FFF', fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 4}}>{p.status}</span>

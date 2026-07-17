@@ -809,3 +809,349 @@ async def run_cro_engine(payload: CROEngineRequest, db: Session = Depends(get_db
         db.commit()
         return mock_messages
 
+
+# --- Unified Ambulance Dispatch, Inter-hospital Patient Exchange & CSV Reports ---
+
+import math
+import csv
+from io import StringIO
+from fastapi.responses import StreamingResponse
+
+def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    # Haversine distance formula
+    R = 6371.0  # Earth radius in km
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return round(R * c, 1)
+
+@router.get("/hospitals/nearby")
+def get_nearby_hospitals(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    primary = db.query(Hospital).filter(Hospital.name == "Metro General Hospital Center").first()
+    p_lat, p_lng = (primary.latitude, primary.longitude) if primary else (13.0827, 80.2707)
+    
+    hospitals = db.query(Hospital).filter(Hospital.name != "Metro General Hospital Center").all()
+    result = []
+    
+    for h in hospitals:
+        dist = calculate_distance(p_lat, p_lng, h.latitude, h.longitude)
+        travel_time = max(5, int(dist * 1.8))  # ~1.8 mins per km, min 5
+        
+        try:
+            specs = json.loads(h.specialties or "[]")
+        except Exception:
+            specs = []
+            
+        result.append({
+            "id": h.id,
+            "name": h.name,
+            "address": h.address,
+            "latitude": h.latitude,
+            "longitude": h.longitude,
+            "distance": dist,
+            "travel_time": travel_time,
+            "contact_number": h.contact_number,
+            "specialties": specs,
+            "bed_count": h.bed_count,
+            "available_beds": h.available_beds,
+            "icu_beds": h.icu_beds,
+            "available_icu_beds": h.available_icu_beds,
+            "ambulances_total": h.ambulances_total,
+            "ambulances_available": h.ambulances_available,
+            "ambulances_busy": h.ambulances_busy,
+            "ambulances_maintenance": h.ambulances_maintenance,
+            "capacity_percent": round(((h.bed_count - h.available_beds) / h.bed_count * 100), 1) if h.bed_count else 0
+        })
+        
+    result.sort(key=lambda x: x["distance"])
+    return result
+
+class RecommendRequest(BaseModel):
+    patient_id: str
+    severity: str
+
+@router.post("/ambulance/recommend")
+def recommend_hospital(payload: RecommendRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    patient = db.query(Patient).filter(Patient.id == payload.patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    primary = db.query(Hospital).filter(Hospital.name == "Metro General Hospital Center").first()
+    p_lat, p_lng = (primary.latitude, primary.longitude) if primary else (13.0827, 80.2707)
+    
+    hospitals = db.query(Hospital).filter(Hospital.name != "Metro General Hospital Center").all()
+    candidates = []
+    
+    for h in hospitals:
+        dist = calculate_distance(p_lat, p_lng, h.latitude, h.longitude)
+        travel_time = max(5, int(dist * 1.8))
+        
+        score = 100.0
+        reasons = []
+        
+        if payload.severity in ["Critical", "High", "CRITICAL"]:
+            if h.available_icu_beds > 0:
+                score += 30.0
+                reasons.append(f"ICU Bed Available ({h.available_icu_beds} open)")
+            else:
+                score -= 50.0
+                reasons.append("No ICU Bed Available")
+        else:
+            if h.available_beds > 0:
+                score += 20.0
+                reasons.append(f"General Bed Available ({h.available_beds} open)")
+            else:
+                score -= 30.0
+                reasons.append("High occupancy")
+                
+        if h.ambulances_available > 0:
+            score += 15.0
+            reasons.append(f"{h.ambulances_available} Ambulances Available")
+        else:
+            score -= 20.0
+            reasons.append("No active ambulance units")
+            
+        score -= dist * 2.0
+        reasons.append(f"{dist} km Away")
+        
+        diag = (patient.diagnosis or "").lower()
+        try:
+            specs = json.loads(h.specialties or "[]")
+        except Exception:
+            specs = []
+            
+        matched_spec = None
+        if "cardiac" in diag or "heart" in diag or "tension" in diag:
+            if "Cardiothoracic Surgery" in specs:
+                matched_spec = "Cardiothoracic Surgery"
+        elif "tbi" in diag or "neuro" in diag or "head" in diag:
+            if "Neurosurgery" in specs:
+                matched_spec = "Neurosurgery"
+        elif "fracture" in diag or "femur" in diag:
+            if "Orthopedics" in specs:
+                matched_spec = "Orthopedics"
+        elif "sepsis" in diag or "shock" in diag:
+            if "Intensive Care Unit" in specs:
+                matched_spec = "Intensive Care Unit"
+                
+        if matched_spec:
+            score += 40.0
+            reasons.append(f"{matched_spec} Department Available")
+            
+        candidates.append({
+            "hospital": h,
+            "score": score,
+            "dist": dist,
+            "travel_time": travel_time,
+            "reasons": reasons
+        })
+        
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    best = candidates[0]
+    best_h = best["hospital"]
+    
+    return {
+        "recommended_hospital": best_h.name,
+        "recommended_hospital_id": best_h.id,
+        "travel_time": best["travel_time"],
+        "distance": best["dist"],
+        "reasons": best["reasons"][:5],
+        "confidence": "High" if best["score"] > 80 else "Medium"
+    }
+
+class DispatchRequest(BaseModel):
+    hospital_name: str
+    patient_id: str
+
+@router.post("/ambulance/dispatch")
+def dispatch_ambulance(payload: DispatchRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    h = db.query(Hospital).filter(Hospital.name == payload.hospital_name).first()
+    if not h:
+        raise HTTPException(status_code=404, detail="Hospital not found")
+        
+    if h.ambulances_available > 0:
+        h.ambulances_available -= 1
+        h.ambulances_busy += 1
+        
+    patient = db.query(Patient).filter(Patient.id == payload.patient_id).first()
+    patient_name = patient.name if patient else payload.patient_id
+    
+    time_str = datetime.datetime.now().strftime("%I:%M:%S %p")
+    log_text = f"Ambulance unit dispatched to {h.name} for patient {patient_name} ({payload.patient_id}). Estimated Travel Time: {max(5, int(calculate_distance(13.0827, 80.2707, h.latitude, h.longitude) * 1.8))} mins."
+    
+    log = NexusAuditLog(
+        agent=current_user.name or current_user.username,
+        role=current_user.role.upper(),
+        text=log_text,
+        time=time_str
+    )
+    db.add(log)
+    
+    create_notification(db, f"Ambulance Dispatch: Paramedic unit sent to {h.name} for {payload.patient_id}.", role="Coordinator", severity="info")
+    db.commit()
+    return {"success": True, "detail": log_text}
+
+@router.get("/patients/{patient_id}/csv-report")
+def generate_patient_csv_report(patient_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    output = StringIO()
+    writer = csv.writer(output)
+    
+    writer.writerow(["Field", "Value"])
+    writer.writerow(["Patient ID", patient.id])
+    writer.writerow(["Name", patient.name])
+    writer.writerow(["Age", patient.age])
+    writer.writerow(["Gender", patient.gender])
+    writer.writerow(["Blood Group", patient.bloodGroup])
+    writer.writerow(["Diagnosis", patient.diagnosis])
+    writer.writerow(["Status", patient.status])
+    writer.writerow(["Bed Assigned", patient.bedId])
+    writer.writerow(["Attending Doctor", patient.attendingDoctor])
+    writer.writerow(["Admission Time", patient.admission_time.isoformat() if patient.admission_time else "N/A"])
+    writer.writerow(["Vitals", patient.vitals])
+    writer.writerow(["Treatments", patient.treatments])
+    writer.writerow(["Tests", patient.tests])
+    writer.writerow(["AI Summary", patient.aiSummary])
+    writer.writerow(["Care Plan Notes", patient.notes])
+    
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=Patient_Record_{patient.id}.csv"}
+    )
+
+@router.get("/patients/{patient_id}/export-json")
+def export_patient_json(patient_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+        
+    data = {
+        "id": patient.id,
+        "name": patient.name,
+        "name_encrypted": patient.name_encrypted,
+        "age": patient.age,
+        "gender": patient.gender,
+        "bloodGroup": patient.bloodGroup,
+        "diagnosis": patient.diagnosis,
+        "mechanism": patient.mechanism,
+        "admittedAt": patient.admittedAt,
+        "admission_time": patient.admission_time.isoformat() if patient.admission_time else None,
+        "attendingDoctor": patient.attendingDoctor,
+        "consultedDoctors": patient.consultedDoctors,
+        "bedId": patient.bedId,
+        "status": patient.status,
+        "vitals": patient.vitals,
+        "treatments": patient.treatments,
+        "tests": patient.tests,
+        "aiSummary": patient.aiSummary,
+        "notes": patient.notes,
+        "triage_level": patient.triage_level,
+        "clinical_data_json": patient.clinical_data_json,
+        "is_vip": patient.is_vip
+    }
+    
+    time_str = datetime.datetime.now().strftime("%I:%M:%S %p")
+    log = NexusAuditLog(
+        agent=current_user.name or current_user.username,
+        role=current_user.role.upper(),
+        text=f"Exported Patient Record {patient.id} as Structured JSON.",
+        time=time_str
+    )
+    db.add(log)
+    db.commit()
+    return data
+
+class PatientImportPayload(BaseModel):
+    id: str
+    name: Optional[str] = None
+    name_encrypted: Optional[str] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    bloodGroup: Optional[str] = None
+    diagnosis: Optional[str] = None
+    mechanism: Optional[str] = None
+    admittedAt: Optional[int] = None
+    admission_time: Optional[str] = None
+    attendingDoctor: Optional[str] = None
+    consultedDoctors: Optional[str] = "[]"
+    bedId: Optional[str] = None
+    status: Optional[str] = "Pending"
+    vitals: Optional[str] = "{}"
+    treatments: Optional[str] = "[]"
+    tests: Optional[str] = "[]"
+    aiSummary: Optional[str] = "{}"
+    notes: Optional[str] = None
+    triage_level: Optional[int] = 3
+    clinical_data_json: Optional[str] = "{}"
+    is_vip: Optional[int] = 0
+
+@router.post("/patients/import-json")
+def import_patient_json(payload: PatientImportPayload, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    patient = db.query(Patient).filter(Patient.id == payload.id).first()
+    
+    admission_dt = None
+    if payload.admission_time:
+        try:
+            admission_dt = datetime.datetime.fromisoformat(payload.admission_time)
+        except Exception:
+            admission_dt = datetime.datetime.utcnow()
+            
+    if patient:
+        patient.name = payload.name or patient.name
+        patient.age = payload.age or patient.age
+        patient.gender = payload.gender or patient.gender
+        patient.bloodGroup = payload.bloodGroup or patient.bloodGroup
+        patient.diagnosis = payload.diagnosis or patient.diagnosis
+        patient.status = payload.status or patient.status
+        patient.vitals = payload.vitals or patient.vitals
+        patient.treatments = payload.treatments or patient.treatments
+        patient.tests = payload.tests or patient.tests
+        patient.notes = payload.notes or patient.notes
+        action_msg = f"Merged and updated patient record {payload.id} via inter-hospital import."
+    else:
+        patient = Patient(
+            id=payload.id,
+            name=payload.name,
+            name_encrypted=payload.name_encrypted or payload.name or "Imported Patient",
+            age=payload.age,
+            gender=payload.gender,
+            bloodGroup=payload.bloodGroup,
+            diagnosis=payload.diagnosis,
+            mechanism=payload.mechanism,
+            admittedAt=payload.admittedAt or 0,
+            admission_time=admission_dt or datetime.datetime.utcnow(),
+            attendingDoctor=payload.attendingDoctor,
+            consultedDoctors=payload.consultedDoctors,
+            bedId=payload.bedId,
+            status=payload.status,
+            vitals=payload.vitals,
+            treatments=payload.treatments,
+            tests=payload.tests,
+            aiSummary=payload.aiSummary,
+            notes=payload.notes,
+            triage_level=payload.triage_level or 3,
+            clinical_data_json=payload.clinical_data_json or "{}",
+            is_vip=payload.is_vip or 0
+        )
+        db.add(patient)
+        action_msg = f"Imported new patient record {payload.id} via inter-hospital exchange."
+        
+    time_str = datetime.datetime.now().strftime("%I:%M:%S %p")
+    log = NexusAuditLog(
+        agent=current_user.name or current_user.username,
+        role=current_user.role.upper(),
+        text=action_msg,
+        time=time_str
+    )
+    db.add(log)
+    
+    create_notification(db, f"Patient Record Imported: {payload.id} ({payload.name})", role="Receptionist", severity="info")
+    db.commit()
+    return {"success": True, "detail": action_msg}
+

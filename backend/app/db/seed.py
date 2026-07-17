@@ -15,14 +15,209 @@ def seed_db():
 
     db = SessionLocal()
     try:
-        # 1. Seed Hospital
+        # 1. Seed Hospital (Primary: Metro General Hospital Center)
         hospital = Hospital(
             name="Metro General Hospital Center",
-            latitude=40.7128,
-            longitude=-74.0060
+            latitude=13.0827,
+            longitude=80.2707,
+            address="Eurasia Park Town, Chennai, Tamil Nadu",
+            contact_number="+91 44 2530 1111",
+            specialties=json.dumps(["Emergency Medicine", "Intensive Care Unit", "Cardiothoracic Surgery", "Neurosurgery", "General Surgery"]),
+            bed_count=150,
+            available_beds=42,
+            icu_beds=20,
+            available_icu_beds=4,
+            ambulances_total=8,
+            ambulances_available=4,
+            ambulances_busy=3,
+            ambulances_maintenance=1
         )
         db.add(hospital)
         db.flush()  # Generates UUIDs
+
+        # Seed 10 other Chennai Hospitals
+        chennai_hospitals = [
+            {
+                "name": "Apollo Hospitals Greams Road",
+                "latitude": 13.0606,
+                "longitude": 80.2512,
+                "address": "Greams Road, Thousand Lights, Chennai, Tamil Nadu",
+                "contact_number": "+91 44 2829 0200",
+                "specialties": json.dumps(["Cardiothoracic Surgery", "Intensive Care Unit", "Emergency Medicine"]),
+                "bed_count": 350,
+                "available_beds": 75,
+                "icu_beds": 50,
+                "available_icu_beds": 12,
+                "ambulances_total": 12,
+                "ambulances_available": 6,
+                "ambulances_busy": 4,
+                "ambulances_maintenance": 2
+            },
+            {
+                "name": "Kauvery Hospital",
+                "latitude": 13.0336,
+                "longitude": 80.2505,
+                "address": "Alwarpet, Chennai, Tamil Nadu",
+                "contact_number": "+91 44 4000 6000",
+                "specialties": json.dumps(["Emergency Medicine", "Pulmonology", "Internal Medicine"]),
+                "bed_count": 200,
+                "available_beds": 35,
+                "icu_beds": 30,
+                "available_icu_beds": 5,
+                "ambulances_total": 8,
+                "ambulances_available": 3,
+                "ambulances_busy": 4,
+                "ambulances_maintenance": 1
+            },
+            {
+                "name": "MIOT International",
+                "latitude": 13.0232,
+                "longitude": 80.1856,
+                "address": "Manapakkam, Chennai, Tamil Nadu",
+                "contact_number": "+91 44 4200 2288",
+                "specialties": json.dumps(["Orthopedics", "General Surgery", "Emergency Medicine"]),
+                "bed_count": 500,
+                "available_beds": 110,
+                "icu_beds": 80,
+                "available_icu_beds": 15,
+                "ambulances_total": 15,
+                "ambulances_available": 8,
+                "ambulances_busy": 5,
+                "ambulances_maintenance": 2
+            },
+            {
+                "name": "MGM Healthcare",
+                "latitude": 13.0427,
+                "longitude": 80.2564,
+                "address": "Aminjikarai, Chennai, Tamil Nadu",
+                "contact_number": "+91 44 4524 2424",
+                "specialties": json.dumps(["Cardiothoracic Surgery", "Intensive Care Unit", "Neurosurgery"]),
+                "bed_count": 400,
+                "available_beds": 90,
+                "icu_beds": 60,
+                "available_icu_beds": 8,
+                "ambulances_total": 10,
+                "ambulances_available": 4,
+                "ambulances_busy": 5,
+                "ambulances_maintenance": 1
+            },
+            {
+                "name": "Fortis Malar Hospital",
+                "latitude": 13.0064,
+                "longitude": 80.2577,
+                "address": "Adyar, Chennai, Tamil Nadu",
+                "contact_number": "+91 44 4242 4242",
+                "specialties": json.dumps(["Cardiothoracic Surgery", "Emergency Medicine", "General Surgery"]),
+                "bed_count": 180,
+                "available_beds": 28,
+                "icu_beds": 25,
+                "available_icu_beds": 3,
+                "ambulances_total": 6,
+                "ambulances_available": 2,
+                "ambulances_busy": 3,
+                "ambulances_maintenance": 1
+            },
+            {
+                "name": "Sri Ramachandra Medical Centre",
+                "latitude": 13.0371,
+                "longitude": 80.1416,
+                "address": "Porur, Chennai, Tamil Nadu",
+                "contact_number": "+91 44 2476 8027",
+                "specialties": json.dumps(["Neurosurgery", "Intensive Care Unit", "Pulmonology"]),
+                "bed_count": 800,
+                "available_beds": 190,
+                "icu_beds": 120,
+                "available_icu_beds": 24,
+                "ambulances_total": 20,
+                "ambulances_available": 10,
+                "ambulances_busy": 8,
+                "ambulances_maintenance": 2
+            },
+            {
+                "name": "SIMS Hospital",
+                "latitude": 13.0514,
+                "longitude": 80.2104,
+                "address": "Vadapalani, Chennai, Tamil Nadu",
+                "contact_number": "+91 44 4396 9999",
+                "specialties": json.dumps(["Orthopedics", "Cardiothoracic Surgery", "Neurosurgery"]),
+                "bed_count": 345,
+                "available_beds": 64,
+                "icu_beds": 45,
+                "available_icu_beds": 9,
+                "ambulances_total": 10,
+                "ambulances_available": 5,
+                "ambulances_busy": 4,
+                "ambulances_maintenance": 1
+            },
+            {
+                "name": "Government General Hospital",
+                "latitude": 13.0818,
+                "longitude": 80.2721,
+                "address": "Park Town, Chennai, Tamil Nadu",
+                "contact_number": "+91 44 2530 5000",
+                "specialties": json.dumps(["Emergency Medicine", "General Surgery", "Internal Medicine"]),
+                "bed_count": 1500,
+                "available_beds": 350,
+                "icu_beds": 150,
+                "available_icu_beds": 18,
+                "ambulances_total": 25,
+                "ambulances_available": 12,
+                "ambulances_busy": 10,
+                "ambulances_maintenance": 3
+            },
+            {
+                "name": "Gleneagles HealthCity",
+                "latitude": 12.8778,
+                "longitude": 80.2184,
+                "address": "Perumbakkam, Chennai, Tamil Nadu",
+                "contact_number": "+91 44 6677 8888",
+                "specialties": json.dumps(["Intensive Care Unit", "Pulmonology", "General Surgery"]),
+                "bed_count": 250,
+                "available_beds": 52,
+                "icu_beds": 35,
+                "available_icu_beds": 6,
+                "ambulances_total": 8,
+                "ambulances_available": 3,
+                "ambulances_busy": 4,
+                "ambulances_maintenance": 1
+            },
+            {
+                "name": "Vijaya Hospital",
+                "latitude": 13.0512,
+                "longitude": 80.2084,
+                "address": "Vadapalani, Chennai, Tamil Nadu",
+                "contact_number": "+91 44 6677 8899",
+                "specialties": json.dumps(["Internal Medicine", "Orthopedics", "Emergency Medicine"]),
+                "bed_count": 300,
+                "available_beds": 48,
+                "icu_beds": 40,
+                "available_icu_beds": 7,
+                "ambulances_total": 9,
+                "ambulances_available": 4,
+                "ambulances_busy": 4,
+                "ambulances_maintenance": 1
+            }
+        ]
+
+        for h_data in chennai_hospitals:
+            h = Hospital(
+                name=h_data["name"],
+                latitude=h_data["latitude"],
+                longitude=h_data["longitude"],
+                address=h_data["address"],
+                contact_number=h_data["contact_number"],
+                specialties=h_data["specialties"],
+                bed_count=h_data["bed_count"],
+                available_beds=h_data["available_beds"],
+                icu_beds=h_data["icu_beds"],
+                available_icu_beds=h_data["available_icu_beds"],
+                ambulances_total=h_data["ambulances_total"],
+                ambulances_available=h_data["ambulances_available"],
+                ambulances_busy=h_data["ambulances_busy"],
+                ambulances_maintenance=h_data["ambulances_maintenance"]
+            )
+            db.add(h)
+        db.flush()
 
         # 2. Seed Users for each RBAC Role
         roles_passwords = {
