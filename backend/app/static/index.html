@@ -2449,31 +2449,30 @@
     // --- MAIN APP FRAMEWORK RENDER ---
     const App = () => {
       const [screen, setScreen] = useState('INTRO');
-      const [user, setUser] = useState({
-        id: 'DR-2025-001',
-        username: 'DR-2025-001',
-        name: 'Anjali Sharma',
-        role: 'DOCTOR',
-        initial: 'A',
-        specialty: 'Emergency Medicine',
-        dept: 'Emergency Medicine'
-      });
+      const [user, setUser] = useState(null);
 
       useEffect(() => {
         const checkAuth = async () => {
-          let token = localStorage.getItem('token') || 'bypass-token';
-          api.setToken(token);
-          try {
-            const u = await api.request('/api/auth/me');
-            setUser(u);
-          } catch (e) {
-            // Keep default doctor user
+          let token = localStorage.getItem('token');
+          if (token) {
+            api.setToken(token);
+            try {
+              const u = await api.request('/api/auth/me');
+              setUser(u);
+              setScreen('DASHBOARD');
+            } catch (e) {
+              localStorage.removeItem('token');
+              api.setToken(null);
+            }
           }
         };
         checkAuth();
         
         const handleUnauthorized = () => {
-          // Keep current state to avoid kickout in bypass mode
+          localStorage.removeItem('token');
+          api.setToken(null);
+          setUser(null);
+          setScreen('LOGIN');
         };
         window.addEventListener('unauthorized', handleUnauthorized);
         return () => window.removeEventListener('unauthorized', handleUnauthorized);
@@ -2490,7 +2489,11 @@
         <div style={{width: '100vw', height: '100vh', overflow: 'hidden'}}>
           {screen === 'INTRO' && (
             <IntroScreen onComplete={() => {
-              setScreen('DASHBOARD');
+              if (user) {
+                setScreen('DASHBOARD');
+              } else {
+                setScreen('LOGIN');
+              }
             }} />
           )}
           {screen === 'LOGIN' && (

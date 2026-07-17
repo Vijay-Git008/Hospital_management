@@ -5,12 +5,8 @@ import { AISettings } from './pages/AISettings';
 import { Shield, BrainCircuit, Users, Lock, LogOut, CheckCircle, RefreshCw, Key } from 'lucide-react';
 
 export default function App() {
-  const [token, setToken] = useState<string | null>(localStorage.getItem('token') || 'bypass-token');
-  const [user, setUser] = useState<any>({
-    username: 'admin',
-    role: 'Administrator',
-    name: 'Admin User'
-  });
+  const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+  const [user, setUser] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'ai_settings' | 'audit_logs'>('dashboard');
   
   // Login form state
@@ -29,7 +25,10 @@ export default function App() {
       const me = await apiService.getMe();
       setUser(me);
     } catch (e) {
-      console.warn("FastAPI offline or loading. Using local admin session bypass:", e);
+      console.error("Session expired or offline:", e);
+      apiService.logout();
+      setToken(null);
+      setUser(null);
     }
   };
 
@@ -55,12 +54,8 @@ export default function App() {
 
   const handleLogout = () => {
     apiService.logout();
-    setToken('bypass-token');
-    setUser({
-      username: 'admin',
-      role: 'Administrator',
-      name: 'Admin User'
-    });
+    setToken(null);
+    setUser(null);
   };
 
   const loadAudits = async () => {
