@@ -14,6 +14,14 @@ export default function App() {
   const [password, setPassword] = useState('admin_user');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [timeStr, setTimeStr] = useState('');
+
+  useEffect(() => {
+    const update = () => setTimeStr(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Audits logs state
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -186,7 +194,24 @@ export default function App() {
           </button>
         </nav>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ 
+            fontFamily: 'var(--font-mono, monospace)', 
+            fontSize: '0.85rem', 
+            fontWeight: 600, 
+            color: 'var(--text-secondary)',
+            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid var(--border-color)',
+            padding: '4px 10px',
+            borderRadius: '6px',
+            letterSpacing: '0.05em',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            🕒 {timeStr}
+          </div>
+
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
             <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{user.username}</span>
             <span className="badge badge-stable" style={{ fontSize: '0.65rem', marginTop: '2px' }}>{user.role}</span>

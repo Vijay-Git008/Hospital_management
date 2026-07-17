@@ -744,9 +744,10 @@
               <div style={{fontFamily: 'Inter', fontWeight: 600, fontSize: 17, color: COLORS.primary}}>
                 {allowedTabs.find(t=>t.id===tab)?.label || 'Workspace'}
               </div>
-              <div className="mono text-slate-500" style={{fontSize: 13, color: COLORS.secondary}}>{timeStr}</div>
               
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-6">
+                <div className="mono text-slate-500" style={{fontFamily: 'monospace', fontSize: 13, color: COLORS.secondary, fontWeight: 600, letterSpacing: '0.05em'}}>{timeStr}</div>
+                
                 <div style={{fontSize: 13, color: COLORS.primary, fontWeight: 500}}>
                    NEXUS Central Hub
                 </div>
