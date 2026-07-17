@@ -65,7 +65,12 @@ export function NegotiationTimeline({ negotiationId, refreshTrigger }: Negotiati
         </div>
       ) : (
         steps.map((s) => {
-          const payload = JSON.parse(s.content_json || '{}');
+          let payload: any = {};
+          try {
+            payload = JSON.parse(s.content_json || '{}');
+          } catch (err) {
+            console.error('Failed to parse s.content_json:', err);
+          }
           let text = '';
 
           if (s.step_type === 'CFP') {

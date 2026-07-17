@@ -28,17 +28,20 @@ export function useNegotiationSocket(onMessageCallback: (data: any) => void) {
       }
     }
 
+    let active = true;
     const connect = () => {
+      if (!active) return;
       console.log(`Connecting to WebSocket: ${socketUrl}`);
       const ws = new WebSocket(socketUrl);
       socketRef.current = ws;
 
       ws.onopen = () => {
-        setConnected(true);
+        if (active) setConnected(true);
         console.log('WebSocket connection established.');
       };
 
       ws.onmessage = (event) => {
+        if (!active) return;
         try {
           const data = JSON.parse(event.data);
           onMessageCallback(data);
@@ -48,9 +51,11 @@ export function useNegotiationSocket(onMessageCallback: (data: any) => void) {
       };
 
       ws.onclose = () => {
-        setConnected(false);
-        console.log('WebSocket connection closed. Reconnecting in 3s...');
-        setTimeout(connect, 3000);
+        if (active) {
+          setConnected(false);
+          console.log('WebSocket connection closed. Reconnecting in 3s...');
+          setTimeout(connect, 3000);
+        }
       };
 
       ws.onerror = (error) => {
@@ -62,6 +67,7 @@ export function useNegotiationSocket(onMessageCallback: (data: any) => void) {
     connect();
 
     return () => {
+      active = false;
       if (socketRef.current) {
         socketRef.current.close();
       }

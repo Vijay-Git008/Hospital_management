@@ -32,7 +32,14 @@ export function ExplainabilityPanel({ patient, negotiation }: ExplainabilityPane
     }
   };
 
-  const tree = negotiation ? JSON.parse(negotiation.reasoning_tree_json || '{}') : null;
+  let tree: any = null;
+  try {
+    if (negotiation && negotiation.reasoning_tree_json) {
+      tree = JSON.parse(negotiation.reasoning_tree_json);
+    }
+  } catch (err) {
+    console.error('Failed to parse reasoning_tree_json:', err);
+  }
   const aiNarrative = tree?.ai_narrative || 'AI explanation justification pending CRO Engine allocation.';
   const bundle = tree?.allocated_bundle || [];
 

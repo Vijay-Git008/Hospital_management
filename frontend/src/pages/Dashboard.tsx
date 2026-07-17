@@ -61,7 +61,12 @@ export function Dashboard() {
       
       const edges: any[] = [];
       c.forEach(pt => {
-        const clin = JSON.parse(pt.clinical_data_json || '{}');
+        let clin: any = {};
+        try {
+          clin = JSON.parse(pt.clinical_data_json || '{}');
+        } catch (err) {
+          console.error('Failed to parse pt.clinical_data_json:', err);
+        }
         const reqs = clin.required_resources || [];
         reqs.forEach((req: string) => {
           r.filter(res => res.type === req).forEach(res => {
@@ -78,7 +83,12 @@ export function Dashboard() {
 
       // Add solid active allocations
       h.filter(neg => neg.status === 'Awarded').forEach(neg => {
-        const tree = JSON.parse(neg.reasoning_tree_json || '{}');
+        let tree: any = {};
+        try {
+          tree = JSON.parse(neg.reasoning_tree_json || '{}');
+        } catch (err) {
+          console.error('Failed to parse neg.reasoning_tree_json:', err);
+        }
         const bundle = tree.allocated_bundle || [];
         bundle.forEach((b: any) => {
           edges.push({

@@ -39,7 +39,12 @@ export function ResourcePanel({ resources, onOverrideCompleted }: ResourcePanelP
 
             <div className="floor-grid">
               {typeRes.map((r) => {
-                const meta = JSON.parse(r.metadata_json || '{}');
+                let meta: any = {};
+                try {
+                  meta = JSON.parse(r.metadata_json || '{}');
+                } catch (err) {
+                  console.error('Failed to parse r.metadata_json:', err);
+                }
                 const isOccupied = r.status === 'Occupied';
                 const isMaint = r.status === 'Maintenance';
 

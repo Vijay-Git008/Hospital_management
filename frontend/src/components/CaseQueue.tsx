@@ -49,7 +49,12 @@ export function CaseQueue({ cases, onSelectCase, selectedCaseId }: CaseQueueProp
         </div>
       ) : (
         cases.map((c) => {
-          const clinical = JSON.parse(c.clinical_data_json || '{}');
+          let clinical: any = {};
+          try {
+            clinical = JSON.parse(c.clinical_data_json || '{}');
+          } catch (err) {
+            console.error('Failed to parse clinical_data_json:', err);
+          }
           const isSelected = c.id === selectedCaseId;
 
             return (
