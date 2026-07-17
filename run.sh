@@ -38,9 +38,10 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 &
 cd ..
 
 # 4. Start Frontend
-echo "[4/4] Resolving frontend dependencies and starting Vite..."
+echo "[4/4] Resolving frontend dependencies and building for production..."
 cd frontend
 npm install
+npm run build
 npm run dev -- --host 0.0.0.0 &
 cd ..
 
